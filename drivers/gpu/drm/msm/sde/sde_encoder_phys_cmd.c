@@ -13,6 +13,7 @@
  */
 
 #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
+#include <linux/cpu_input_boost.h>
 #include "sde_encoder_phys.h"
 #include "sde_hw_interrupts.h"
 #include "sde_core_irq.h"
@@ -1316,6 +1317,7 @@ static void sde_encoder_phys_cmd_trigger_start(
 	if (frame_cnt) {
 		_sde_encoder_phys_cmd_config_autorefresh(phys_enc, frame_cnt);
 		atomic_inc(&cmd_enc->autorefresh.kickoff_cnt);
+		cpu_input_boost_kick();
 	} else {
 		sde_encoder_helper_trigger_start(phys_enc);
 	}
