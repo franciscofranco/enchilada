@@ -18,7 +18,6 @@
 
 #include <linux/msm_drm_notify.h>
 #include <linux/notifier.h>
-#include <linux/cpu_input_boost.h>
 
 #include "msm_drv.h"
 #include "msm_kms.h"
@@ -700,8 +699,6 @@ int msm_atomic_commit(struct drm_device *dev,
 	 * composition of the next frame right after having submitted the
 	 * current layout.
 	 */
-
-	cpu_input_boost_kick();
 
 	msm_atomic_commit_dispatch(dev, state, c);
 	SDE_ATRACE_END("atomic_commit");
