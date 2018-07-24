@@ -80,6 +80,11 @@
 /* Maximum number of VSYNC wait attempts for RSC state transition */
 #define MAX_RSC_WAIT	5
 
+#define TOPOLOGY_DUALPIPE_MERGE_MODE(x) \
+		(((x) == SDE_RM_TOPOLOGY_DUALPIPE_DSCMERGE) || \
+		((x) == SDE_RM_TOPOLOGY_DUALPIPE_3DMERGE) || \
+		((x) == SDE_RM_TOPOLOGY_DUALPIPE_3DMERGE_DSC))
+
 /**
  * enum sde_enc_rc_events - events for resource control state machine
  * @SDE_ENC_RC_EVENT_KICKOFF:
@@ -1870,6 +1875,7 @@ static void sde_encoder_input_event_handler(struct input_handle *handle,
 	struct sde_encoder_virt *sde_enc = NULL;
 	struct msm_drm_thread *disp_thread = NULL;
 	struct msm_drm_private *priv = NULL;
+	unsigned long lock_flags;
 
 	if (!handle || !handle->handler || !handle->handler->private) {
 		SDE_ERROR("invalid encoder for the input event\n");
@@ -1884,18 +1890,19 @@ static void sde_encoder_input_event_handler(struct input_handle *handle,
 
 	priv = drm_enc->dev->dev_private;
 	sde_enc = to_sde_encoder_virt(drm_enc);
+	spin_lock_irqsave(&sde_enc->enc_spinlock, lock_flags);
 	if (!sde_enc->crtc || (sde_enc->crtc->index
 			>= ARRAY_SIZE(priv->disp_thread))) {
+	spin_unlock_irqrestore(&sde_enc->enc_spinlock, lock_flags);
 		SDE_DEBUG_ENC(sde_enc,
 			"invalid cached CRTC: %d or crtc index: %d\n",
 			sde_enc->crtc == NULL,
 			sde_enc->crtc ? sde_enc->crtc->index : -EINVAL);
 		return;
 	}
-
-	SDE_EVT32_VERBOSE(DRMID(drm_enc));
-
 	disp_thread = &priv->disp_thread[sde_enc->crtc->index];
+	spin_unlock_irqrestore(&sde_enc->enc_spinlock, lock_flags);
+	SDE_EVT32_VERBOSE(DRMID(drm_enc));
 
 	kthread_queue_work(&disp_thread->worker,
 				&sde_enc->input_event_work);
@@ -2651,6 +2658,7 @@ static void sde_encoder_virt_disable(struct drm_encoder *drm_enc)
 	struct drm_connector *drm_conn = NULL;
 	enum sde_intf_mode intf_mode;
 	int i = 0;
+	unsigned long lock_flags;
 
 	if (!drm_enc) {
 		SDE_ERROR("invalid encoder\n");
@@ -2723,8 +2731,11 @@ static void sde_encoder_virt_disable(struct drm_encoder *drm_enc)
 	sde_encoder_resource_control(drm_enc, SDE_ENC_RC_EVENT_STOP);
 
 	for (i = 0; i < sde_enc->num_phys_encs; i++) {
-		if (sde_enc->phys_encs[i])
+		if (sde_enc->phys_encs[i]) {
+			sde_enc->phys_encs[i]->cont_splash_settings = false;
+			sde_enc->phys_encs[i]->cont_splash_single_flush = 0;
 			sde_enc->phys_encs[i]->connector = NULL;
+		}
 	}
 
 	sde_enc->cur_master = NULL;
@@ -2732,7 +2743,9 @@ static void sde_encoder_virt_disable(struct drm_encoder *drm_enc)
 	 * clear the cached crtc in sde_enc on use case finish, after all the
 	 * outstanding events and timers have been completed
 	 */
+	spin_lock_irqsave(&sde_enc->enc_spinlock, lock_flags);
 	sde_enc->crtc = NULL;
+	spin_unlock_irqrestore(&sde_enc->enc_spinlock, lock_flags);
 
 	SDE_DEBUG_ENC(sde_enc, "encoder disabled\n");
 
@@ -3399,22 +3412,55 @@ void sde_encoder_trigger_kickoff_pending(struct drm_encoder *drm_enc)
 static void _sde_encoder_setup_dither(struct sde_encoder_phys *phys)
 {
 	void *dither_cfg;
-	int ret = 0;
+	int ret = 0, rc, i = 0;
 	size_t len = 0;
 	enum sde_rm_topology_name topology;
+	struct drm_encoder *drm_enc;
+	struct msm_mode_info mode_info;
+	struct msm_display_dsc_info *dsc = NULL;
+	struct sde_encoder_virt *sde_enc;
+	struct sde_hw_pingpong *hw_pp;
 
 	if (!phys || !phys->connector || !phys->hw_pp ||
-			!phys->hw_pp->ops.setup_dither)
+			!phys->hw_pp->ops.setup_dither || !phys->parent)
 		return;
+
 	topology = sde_connector_get_topology_name(phys->connector);
 	if ((topology == SDE_RM_TOPOLOGY_PPSPLIT) &&
 			(phys->split_role == ENC_ROLE_SLAVE))
 		return;
 
+	drm_enc = phys->parent;
+	sde_enc = to_sde_encoder_virt(drm_enc);
+	rc = _sde_encoder_get_mode_info(&sde_enc->base, &mode_info);
+	if (rc) {
+		SDE_ERROR_ENC(sde_enc, "failed to get mode info\n");
+		return;
+	}
+
+	dsc = &mode_info.comp_info.dsc_info;
+	/* disable dither for 10 bpp or 10bpc dsc config */
+	if (dsc->bpp == 10 || dsc->bpc == 10) {
+		phys->hw_pp->ops.setup_dither(phys->hw_pp, NULL, 0);
+		return;
+	}
+
 	ret = sde_connector_get_dither_cfg(phys->connector,
-				phys->connector->state, &dither_cfg, &len);
-	if (!ret)
+			phys->connector->state, &dither_cfg, &len);
+	if (ret)
+		return;
+
+	if (TOPOLOGY_DUALPIPE_MERGE_MODE(topology)) {
+		for (i = 0; i < MAX_CHANNELS_PER_ENC; i++) {
+			hw_pp = sde_enc->hw_pp[i];
+			if (hw_pp) {
+				phys->hw_pp->ops.setup_dither(hw_pp, dither_cfg,
+								len);
+			}
+		}
+	} else {
 		phys->hw_pp->ops.setup_dither(phys->hw_pp, dither_cfg, len);
+	}
 }
 
 static u32 _sde_encoder_calculate_linetime(struct sde_encoder_virt *sde_enc,
@@ -3786,6 +3832,7 @@ int sde_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc,
 	SDE_ATRACE_BEGIN("enc_prepare_for_kickoff");
 	for (i = 0; i < sde_enc->num_phys_encs; i++) {
 		phys = sde_enc->phys_encs[i];
+		params->is_primary = sde_enc->disp_info.is_primary;
 		if (phys) {
 			if (phys->ops.prepare_for_kickoff) {
 				rc = phys->ops.prepare_for_kickoff(
@@ -4792,14 +4839,18 @@ int sde_encoder_update_caps_for_cont_splash(struct drm_encoder *encoder)
 			return -EINVAL;
 		}
 
+		/* update connector for master and slave phys encoders */
+		phys->connector = conn;
+		phys->cont_splash_single_flush =
+			sde_kms->splash_data.single_flush_en;
+		phys->cont_splash_settings = true;
+
 		phys->hw_pp = sde_enc->hw_pp[i];
 		if (phys->ops.cont_splash_mode_set)
 			phys->ops.cont_splash_mode_set(phys, drm_mode);
 
-		if (phys->ops.is_master && phys->ops.is_master(phys)) {
-			phys->connector = conn;
+		if (phys->ops.is_master && phys->ops.is_master(phys))
 			sde_enc->cur_master = phys;
-		}
 	}
 
 	return ret;
@@ -4807,33 +4858,6 @@ int sde_encoder_update_caps_for_cont_splash(struct drm_encoder *encoder)
 
 int sde_encoder_display_failure_notification(struct drm_encoder *enc)
 {
-	struct msm_drm_thread *disp_thread = NULL;
-	struct msm_drm_private *priv = NULL;
-	struct sde_encoder_virt *sde_enc = NULL;
-
-	if (!enc || !enc->dev || !enc->dev->dev_private) {
-		SDE_ERROR("invalid parameters\n");
-		return -EINVAL;
-	}
-
-	priv = enc->dev->dev_private;
-	sde_enc = to_sde_encoder_virt(enc);
-	if (!sde_enc->crtc || (sde_enc->crtc->index
-			>= ARRAY_SIZE(priv->disp_thread))) {
-		SDE_DEBUG_ENC(sde_enc,
-			"invalid cached CRTC: %d or crtc index: %d\n",
-			sde_enc->crtc == NULL,
-			sde_enc->crtc ? sde_enc->crtc->index : -EINVAL);
-		return -EINVAL;
-	}
-
-	SDE_EVT32_VERBOSE(DRMID(enc));
-
-	disp_thread = &priv->disp_thread[sde_enc->crtc->index];
-
-	kthread_queue_work(&disp_thread->worker,
-				&sde_enc->esd_trigger_work);
-	kthread_flush_work(&sde_enc->esd_trigger_work);
 	/**
 	 * panel may stop generating te signal (vsync) during esd failure. rsc
 	 * hardware may hang without vsync. Avoid rsc hang by generating the

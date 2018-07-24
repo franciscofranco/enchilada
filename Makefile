@@ -1,6 +1,6 @@
 VERSION = 4
 PATCHLEVEL = 9
-SUBLEVEL = 111
+SUBLEVEL = 114
 EXTRAVERSION =
 NAME = Roaring Lionus
 
@@ -659,7 +659,11 @@ else
 ifdef CONFIG_PROFILE_ALL_BRANCHES
 KBUILD_CFLAGS	+= -O2 $(call cc-disable-warning,maybe-uninitialized,)
 else
+ifeq ($(cc-name),clang)
+KBUILD_CFLAGS   += -O3
+else
 KBUILD_CFLAGS   += -O2
+endif
 endif
 endif
 

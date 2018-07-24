@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -79,6 +79,17 @@
 #define ROT_LM_OFFSET			3
 #define LINE_LM_OFFSET			5
 #define LINE_MODE_WB_OFFSET		2
+
+/**
+ * these configurations are decided based on max mdp clock. It accounts
+ * for max and min display resolution based on virtual hardware resource
+ * support.
+ */
+#define MAX_DISPLAY_HEIGHT_WITH_DECIMATION		2160
+#define MAX_DISPLAY_HEIGHT				5120
+#define MIN_DISPLAY_HEIGHT				0
+#define MIN_DISPLAY_WIDTH				0
+#define MAX_LM_PER_DISPLAY				2
 
 /* maximum XIN halt timeout in usec */
 #define VBIF_XIN_HALT_TIMEOUT		0x4000
@@ -1122,8 +1133,8 @@ static int sde_sspp_parse_dt(struct device_node *np,
 	u32 vig_count = 0, dma_count = 0, rgb_count = 0, cursor_count = 0;
 	struct device_node *snp = NULL;
 
-	prop_value = kzalloc(SSPP_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	prop_value = kcalloc(SSPP_PROP_MAX, sizeof(struct sde_prop_value),
+			     GFP_KERNEL);
 	if (!prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -1144,8 +1155,9 @@ static int sde_sspp_parse_dt(struct device_node *np,
 	/* get vig feature dt properties if they exist */
 	snp = of_get_child_by_name(np, sspp_prop[SSPP_VIG_BLOCKS].prop_name);
 	if (snp) {
-		vig_prop_value = kzalloc(VIG_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+		vig_prop_value = kcalloc(VIG_PROP_MAX,
+					 sizeof(struct sde_prop_value),
+					 GFP_KERNEL);
 		if (!vig_prop_value) {
 			rc = -ENOMEM;
 			goto end;
@@ -1162,9 +1174,9 @@ static int sde_sspp_parse_dt(struct device_node *np,
 	/* get rgb feature dt properties if they exist */
 	snp = of_get_child_by_name(np, sspp_prop[SSPP_RGB_BLOCKS].prop_name);
 	if (snp) {
-		rgb_prop_value = kzalloc(RGB_PROP_MAX *
-					sizeof(struct sde_prop_value),
-					GFP_KERNEL);
+		rgb_prop_value = kcalloc(RGB_PROP_MAX,
+					 sizeof(struct sde_prop_value),
+					 GFP_KERNEL);
 		if (!rgb_prop_value) {
 			rc = -ENOMEM;
 			goto end;
@@ -1300,8 +1312,8 @@ static int sde_ctl_parse_dt(struct device_node *np,
 		goto end;
 	}
 
-	prop_value = kzalloc(HW_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	prop_value = kcalloc(HW_PROP_MAX, sizeof(struct sde_prop_value),
+			     GFP_KERNEL);
 	if (!prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -1371,8 +1383,8 @@ static int sde_mixer_parse_dt(struct device_node *np,
 	}
 	max_blendstages = sde_cfg->max_mixer_blendstages;
 
-	prop_value = kzalloc(MIXER_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	prop_value = kcalloc(MIXER_PROP_MAX, sizeof(struct sde_prop_value),
+			     GFP_KERNEL);
 	if (!prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -1395,9 +1407,9 @@ static int sde_mixer_parse_dt(struct device_node *np,
 	/* get mixer feature dt properties if they exist */
 	snp = of_get_child_by_name(np, mixer_prop[MIXER_BLOCKS].prop_name);
 	if (snp) {
-		blocks_prop_value = kzalloc(MIXER_BLOCKS_PROP_MAX *
-				MAX_SDE_HW_BLK * sizeof(struct sde_prop_value),
-				GFP_KERNEL);
+		blocks_prop_value = kcalloc(MIXER_BLOCKS_PROP_MAX * MAX_SDE_HW_BLK,
+					    sizeof(struct sde_prop_value),
+					    GFP_KERNEL);
 		if (!blocks_prop_value) {
 			rc = -ENOMEM;
 			goto end;
@@ -1413,8 +1425,9 @@ static int sde_mixer_parse_dt(struct device_node *np,
 	}
 
 	/* get the blend_op register offsets */
-	blend_prop_value = kzalloc(MIXER_BLEND_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	blend_prop_value = kcalloc(MIXER_BLEND_PROP_MAX,
+				   sizeof(struct sde_prop_value),
+				   GFP_KERNEL);
 	if (!blend_prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -1530,8 +1543,8 @@ static int sde_intf_parse_dt(struct device_node *np,
 		goto end;
 	}
 
-	prop_value = kzalloc(INTF_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	prop_value = kcalloc(INTF_PROP_MAX, sizeof(struct sde_prop_value),
+			     GFP_KERNEL);
 	if (!prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -1609,8 +1622,8 @@ static int sde_wb_parse_dt(struct device_node *np, struct sde_mdss_cfg *sde_cfg)
 		goto end;
 	}
 
-	prop_value = kzalloc(WB_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	prop_value = kcalloc(WB_PROP_MAX, sizeof(struct sde_prop_value),
+			     GFP_KERNEL);
 	if (!prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -1820,8 +1833,9 @@ static void _sde_inline_rot_parse_dt(struct device_node *np,
 	u32 off_count, sspp_count = 0, wb_count = 0;
 	const char *type;
 
-	prop_value = kzalloc(INLINE_ROT_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	prop_value = kcalloc(INLINE_ROT_PROP_MAX,
+			     sizeof(struct sde_prop_value),
+			     GFP_KERNEL);
 	if (!prop_value)
 		return;
 
@@ -1975,8 +1989,8 @@ static int sde_dspp_top_parse_dt(struct device_node *np,
 		goto end;
 	}
 
-	prop_value = kzalloc(DSPP_TOP_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	prop_value = kcalloc(DSPP_TOP_PROP_MAX, sizeof(struct sde_prop_value),
+			     GFP_KERNEL);
 	if (!prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -2030,8 +2044,8 @@ static int sde_dspp_parse_dt(struct device_node *np,
 		goto end;
 	}
 
-	prop_value = kzalloc(DSPP_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	prop_value = kcalloc(DSPP_PROP_MAX, sizeof(struct sde_prop_value),
+			     GFP_KERNEL);
 	if (!prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -2050,8 +2064,8 @@ static int sde_dspp_parse_dt(struct device_node *np,
 		goto end;
 
 	/* Parse AD dtsi entries */
-	ad_prop_value = kzalloc(AD_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	ad_prop_value = kcalloc(AD_PROP_MAX, sizeof(struct sde_prop_value),
+				GFP_KERNEL);
 	if (!ad_prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -2068,9 +2082,9 @@ static int sde_dspp_parse_dt(struct device_node *np,
 	/* get DSPP feature dt properties if they exist */
 	snp = of_get_child_by_name(np, dspp_prop[DSPP_BLOCKS].prop_name);
 	if (snp) {
-		blocks_prop_value = kzalloc(DSPP_BLOCKS_PROP_MAX *
-				MAX_SDE_HW_BLK * sizeof(struct sde_prop_value),
-				GFP_KERNEL);
+		blocks_prop_value = kcalloc(DSPP_BLOCKS_PROP_MAX * MAX_SDE_HW_BLK,
+					    sizeof(struct sde_prop_value),
+					    GFP_KERNEL);
 		if (!blocks_prop_value) {
 			rc = -ENOMEM;
 			goto end;
@@ -2148,8 +2162,9 @@ static int sde_ds_parse_dt(struct device_node *np,
 	}
 
 	/* Parse the dest scaler top register offset and capabilities */
-	top_prop_value = kzalloc(DS_TOP_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	top_prop_value = kcalloc(DS_TOP_PROP_MAX,
+				 sizeof(struct sde_prop_value),
+				 GFP_KERNEL);
 	if (!top_prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -2168,8 +2183,8 @@ static int sde_ds_parse_dt(struct device_node *np,
 		goto end;
 
 	/* Parse the offset of each dest scaler block */
-	prop_value = kzalloc(DS_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	prop_value = kcalloc(DS_PROP_MAX, sizeof(struct sde_prop_value),
+			     GFP_KERNEL);
 	if (!prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -2250,8 +2265,8 @@ static int sde_dsc_parse_dt(struct device_node *np,
 		goto end;
 	}
 
-	prop_value = kzalloc(DSC_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	prop_value = kcalloc(DSC_PROP_MAX, sizeof(struct sde_prop_value),
+			     GFP_KERNEL);
 	if (!prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -2301,8 +2316,8 @@ static int sde_cdm_parse_dt(struct device_node *np,
 		goto end;
 	}
 
-	prop_value = kzalloc(HW_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	prop_value = kcalloc(HW_PROP_MAX, sizeof(struct sde_prop_value),
+			     GFP_KERNEL);
 	if (!prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -2353,8 +2368,8 @@ static int sde_vbif_parse_dt(struct device_node *np,
 		goto end;
 	}
 
-	prop_value = kzalloc(VBIF_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	prop_value = kcalloc(VBIF_PROP_MAX, sizeof(struct sde_prop_value),
+			     GFP_KERNEL);
 	if (!prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -2578,8 +2593,8 @@ static int sde_pp_parse_dt(struct device_node *np, struct sde_mdss_cfg *sde_cfg)
 		goto end;
 	}
 
-	prop_value = kzalloc(PP_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	prop_value = kcalloc(PP_PROP_MAX, sizeof(struct sde_prop_value),
+			     GFP_KERNEL);
 	if (!prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -2670,8 +2685,8 @@ static int sde_parse_dt(struct device_node *np, struct sde_mdss_cfg *cfg)
 		goto end;
 	}
 
-	prop_value = kzalloc(SDE_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	prop_value = kcalloc(SDE_PROP_MAX, sizeof(struct sde_prop_value),
+			     GFP_KERNEL);
 	if (!prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -2834,8 +2849,8 @@ static int sde_perf_parse_dt(struct device_node *np, struct sde_mdss_cfg *cfg)
 		goto end;
 	}
 
-	prop_value = kzalloc(PERF_PROP_MAX *
-			sizeof(struct sde_prop_value), GFP_KERNEL);
+	prop_value = kcalloc(PERF_PROP_MAX, sizeof(struct sde_prop_value),
+			     GFP_KERNEL);
 	if (!prop_value) {
 		rc = -ENOMEM;
 		goto end;
@@ -3214,7 +3229,7 @@ end:
 	return rc;
 }
 
-static int _sde_hardware_caps(struct sde_mdss_cfg *sde_cfg, uint32_t hw_rev)
+static int _sde_hardware_pre_caps(struct sde_mdss_cfg *sde_cfg, uint32_t hw_rev)
 {
 	int rc = 0;
 
@@ -3243,6 +3258,46 @@ static int _sde_hardware_caps(struct sde_mdss_cfg *sde_cfg, uint32_t hw_rev)
 		sde_cfg->perf.min_prefill_lines = 0xffff;
 		rc = -ENODEV;
 	}
+
+	return rc;
+}
+
+static int _sde_hardware_post_caps(struct sde_mdss_cfg *sde_cfg,
+	uint32_t hw_rev)
+{
+	int rc = 0, i;
+	u32 max_horz_deci = 0, max_vert_deci = 0;
+
+	if (!sde_cfg)
+		return -EINVAL;
+
+	for (i = 0; i < sde_cfg->sspp_count; i++) {
+		if (sde_cfg->sspp[i].sblk) {
+			max_horz_deci = max(max_horz_deci,
+				sde_cfg->sspp[i].sblk->maxhdeciexp);
+			max_vert_deci = max(max_vert_deci,
+				sde_cfg->sspp[i].sblk->maxvdeciexp);
+		}
+	}
+
+	/* this should be updated based on HW rev in future */
+	sde_cfg->max_lm_per_display = MAX_LM_PER_DISPLAY;
+
+	if (max_horz_deci)
+		sde_cfg->max_display_width = sde_cfg->max_sspp_linewidth *
+			max_horz_deci;
+	else
+		sde_cfg->max_display_width = sde_cfg->max_mixer_width *
+			sde_cfg->max_lm_per_display;
+
+	if (max_vert_deci)
+		sde_cfg->max_display_height =
+			MAX_DISPLAY_HEIGHT_WITH_DECIMATION * max_vert_deci;
+	else
+		sde_cfg->max_display_height = MAX_DISPLAY_HEIGHT;
+
+	sde_cfg->min_display_height = MIN_DISPLAY_HEIGHT;
+	sde_cfg->min_display_width = MIN_DISPLAY_WIDTH;
 
 	return rc;
 }
@@ -3305,7 +3360,7 @@ struct sde_mdss_cfg *sde_hw_catalog_init(struct drm_device *dev, u32 hw_rev)
 
 	sde_cfg->hwversion = hw_rev;
 
-	rc = _sde_hardware_caps(sde_cfg, hw_rev);
+	rc = _sde_hardware_pre_caps(sde_cfg, hw_rev);
 	if (rc)
 		goto end;
 
@@ -3374,6 +3429,10 @@ struct sde_mdss_cfg *sde_hw_catalog_init(struct drm_device *dev, u32 hw_rev)
 		goto end;
 
 	rc = sde_parse_reg_dma_dt(np, sde_cfg);
+	if (rc)
+		goto end;
+
+	rc = _sde_hardware_post_caps(sde_cfg, hw_rev);
 	if (rc)
 		goto end;
 

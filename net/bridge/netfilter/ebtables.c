@@ -406,6 +406,12 @@ ebt_check_watcher(struct ebt_entry_watcher *w, struct xt_tgchk_param *par,
 	watcher = xt_request_find_target(NFPROTO_BRIDGE, w->u.name, 0);
 	if (IS_ERR(watcher))
 		return PTR_ERR(watcher);
+
+	if (watcher->family != NFPROTO_BRIDGE) {
+		module_put(watcher->me);
+		return -ENOENT;
+	}
+
 	w->u.watcher = watcher;
 
 	par->target   = watcher;
@@ -704,6 +710,8 @@ ebt_check_entry(struct ebt_entry *e, struct net *net,
 	}
 	i = 0;
 
+	memset(&mtpar, 0, sizeof(mtpar));
+	memset(&tgpar, 0, sizeof(tgpar));
 	mtpar.net	= tgpar.net       = net;
 	mtpar.table     = tgpar.table     = name;
 	mtpar.entryinfo = tgpar.entryinfo = e;
@@ -722,6 +730,13 @@ ebt_check_entry(struct ebt_entry *e, struct net *net,
 	target = xt_request_find_target(NFPROTO_BRIDGE, t->u.name, 0);
 	if (IS_ERR(target)) {
 		ret = PTR_ERR(target);
+		goto cleanup_watchers;
+	}
+
+	/* Reject UNSPEC, xtables verdicts/return values are incompatible */
+	if (target->family != NFPROTO_BRIDGE) {
+		module_put(target->me);
+		ret = -ENOENT;
 		goto cleanup_watchers;
 	}
 
@@ -899,12 +914,12 @@ static int translate_table(struct net *net, const char *name,
 		 * if an error occurs
 		 */
 		newinfo->chainstack =
-			vmalloc(nr_cpu_ids * sizeof(*(newinfo->chainstack)));
+			vmalloc(array_size(nr_cpu_ids, sizeof(*(newinfo->chainstack))));
 		if (!newinfo->chainstack)
 			return -ENOMEM;
 		for_each_possible_cpu(i) {
 			newinfo->chainstack[i] =
-			  vmalloc(udc_cnt * sizeof(*(newinfo->chainstack[0])));
+			  vmalloc(array_size(udc_cnt, sizeof(*(newinfo->chainstack[0]))));
 			if (!newinfo->chainstack[i]) {
 				while (i)
 					vfree(newinfo->chainstack[--i]);
@@ -914,7 +929,7 @@ static int translate_table(struct net *net, const char *name,
 			}
 		}
 
-		cl_s = vmalloc(udc_cnt * sizeof(*cl_s));
+		cl_s = vmalloc(array_size(udc_cnt, sizeof(*cl_s)));
 		if (!cl_s)
 			return -ENOMEM;
 		i = 0; /* the i'th udc */
@@ -1298,7 +1313,7 @@ static int do_update_counters(struct net *net, const char *name,
 	if (num_counters == 0)
 		return -EINVAL;
 
-	tmp = vmalloc(num_counters * sizeof(*tmp));
+	tmp = vmalloc(array_size(num_counters, sizeof(*tmp)));
 	if (!tmp)
 		return -ENOMEM;
 
@@ -1420,7 +1435,7 @@ static int copy_counters_to_user(struct ebt_table *t,
 		return -EINVAL;
 	}
 
-	counterstmp = vmalloc(nentries * sizeof(*counterstmp));
+	counterstmp = vmalloc(array_size(nentries, sizeof(*counterstmp)));
 	if (!counterstmp)
 		return -ENOMEM;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -247,7 +247,7 @@ struct dsi_ctrl {
 	u32 cmd_buffer_iova;
 	u32 cmd_len;
 	void *vaddr;
-	u32 secure_mode;
+	bool secure_mode;
 
 	/* Debug Information */
 	struct dentry *debugfs_root;
@@ -721,6 +721,13 @@ int dsi_message_validate_tx_mode(struct dsi_ctrl *dsi_ctrl, u32 cmd_len,
 void dsi_ctrl_isr_configure(struct dsi_ctrl *dsi_ctrl, bool enable);
 
 /**
+ * dsi_ctrl_mask_error_status_interrupts() - API to mask dsi ctrl error status
+ *                                           interrupts
+ * @dsi_ctrl:              DSI controller handle.
+ */
+void dsi_ctrl_mask_error_status_interrupts(struct dsi_ctrl *dsi_ctrl);
+
+/**
  * dsi_ctrl_irq_update() - Put a irq vote to process DSI error
  *				interrupts at any time.
  * @dsi_ctrl:              DSI controller handle.
@@ -733,5 +740,12 @@ void dsi_ctrl_irq_update(struct dsi_ctrl *dsi_ctrl, bool enable);
  */
 int dsi_ctrl_get_host_engine_init_state(struct dsi_ctrl *dsi_ctrl,
 		bool *state);
+
+/**
+ * dsi_ctrl_wait_for_cmd_mode_mdp_idle() - Wait for command mode engine not to
+ *				     be busy sending data from display engine.
+ * @dsi_ctrl:                     DSI controller handle.
+ */
+int dsi_ctrl_wait_for_cmd_mode_mdp_idle(struct dsi_ctrl *dsi_ctrl);
 
 #endif /* _DSI_CTRL_H_ */

@@ -163,6 +163,34 @@ static void __cam_req_mgr_dec_idx(int32_t *val, int32_t step, int32_t max_val)
 }
 
 /**
+ * __cam_req_mgr_validate_inject_delay()
+ *
+ * @brief    : Check if any pd device is introducing inject delay
+ * @tbl      : cam_req_mgr_req_tbl
+ * @curr_idx : slot idx
+ *
+ * @return   : 0 for success, negative for failure
+ */
+static int __cam_req_mgr_validate_inject_delay(
+	struct cam_req_mgr_req_tbl  *tbl,
+	int32_t curr_idx)
+{
+	struct cam_req_mgr_tbl_slot *slot = NULL;
+
+	while (tbl) {
+		slot = &tbl->slot[curr_idx];
+		if (slot->inject_delay > 0) {
+			slot->inject_delay--;
+			return -EAGAIN;
+		}
+		__cam_req_mgr_dec_idx(&curr_idx, tbl->pd_delta,
+			tbl->num_slots);
+		tbl = tbl->next;
+	}
+	return 0;
+}
+
+/**
  * __cam_req_mgr_traverse()
  *
  * @brief    : Traverse through pd tables, it will internally cover all linked
@@ -201,14 +229,17 @@ static int __cam_req_mgr_traverse(struct cam_req_mgr_traverse *traverse_data)
 		tbl->skip_traverse, traverse_data->in_q->slot[curr_idx].status,
 		traverse_data->in_q->slot[curr_idx].skip_idx);
 
-	if ((slot->inject_delay > 0) &&
-		(traverse_data->self_link == true)) {
-		CAM_DBG(CAM_CRM, "Injecting Delay of one frame");
-		apply_data[tbl->pd].req_id = -1;
-		slot->inject_delay--;
-		/* This pd table is not ready to proceed with asked idx */
-		SET_FAILURE_BIT(traverse_data->result, tbl->pd);
-		return -EAGAIN;
+	if ((traverse_data->self_link == true) &&
+		(!traverse_data->inject_delay_chk)) {
+		rc = __cam_req_mgr_validate_inject_delay(tbl, curr_idx);
+		if (rc) {
+			CAM_DBG(CAM_CRM, "Injecting Delay of one frame");
+			apply_data[tbl->pd].req_id = -1;
+			/* This pd tbl not ready to proceed with asked idx */
+			SET_FAILURE_BIT(traverse_data->result, tbl->pd);
+			return -EAGAIN;
+		}
+		traverse_data->inject_delay_chk = true;
 	}
 
 	/* Check if req is ready or in skip mode or pd tbl is in skip mode */
@@ -232,7 +263,7 @@ static int __cam_req_mgr_traverse(struct cam_req_mgr_traverse *traverse_data)
 					traverse_data->in_q, curr_idx);
 				apply_data[tbl->pd].idx = curr_idx;
 
-				CAM_DBG(CAM_CRM, "req_id: %d with pd of %d",
+				CAM_DBG(CAM_CRM, "req_id: %lld with pd of %d",
 				apply_data[tbl->pd].req_id,
 				apply_data[tbl->pd].pd);
 				/*
@@ -250,6 +281,11 @@ static int __cam_req_mgr_traverse(struct cam_req_mgr_traverse *traverse_data)
 		}
 	} else {
 		/* This pd table is not ready to proceed with asked idx */
+		CAM_INFO(CAM_CRM,
+			"Skip Frame: req: %lld not ready pd: %d open_req count: %d",
+			CRM_GET_REQ_ID(traverse_data->in_q, curr_idx),
+			tbl->pd,
+			traverse_data->open_req_cnt);
 		SET_FAILURE_BIT(traverse_data->result, tbl->pd);
 		return -EAGAIN;
 	}
@@ -452,6 +488,9 @@ static int __cam_req_mgr_send_req(struct cam_req_mgr_core_link *link,
 				rc = dev->ops->apply_req(&apply_req);
 				if (rc < 0)
 					break;
+
+				if (pd == link->max_delay)
+					link->open_req_cnt--;
 			}
 		}
 	}
@@ -462,6 +501,7 @@ static int __cam_req_mgr_send_req(struct cam_req_mgr_core_link *link,
 		for (; i >= 0; i--) {
 			dev = &link->l_dev[i];
 			evt_data.evt_type = CAM_REQ_MGR_LINK_EVT_ERR;
+			evt_data.dev_hdl = dev->dev_hdl;
 			evt_data.link_hdl =  link->link_hdl;
 			evt_data.req_id = apply_req.request_id;
 			evt_data.u.error = CRM_KMD_ERR_BUBBLE;
@@ -511,6 +551,8 @@ static int __cam_req_mgr_check_link_is_ready(struct cam_req_mgr_core_link *link,
 	traverse_data.result = 0;
 	traverse_data.validate_only = validate_only;
 	traverse_data.self_link = self_link;
+	traverse_data.inject_delay_chk = false;
+	traverse_data.open_req_cnt = link->open_req_cnt;
 	/*
 	 *  Traverse through all pd tables, if result is success,
 	 *  apply the settings
@@ -710,6 +752,8 @@ static int __cam_req_mgr_process_sync_req(
 			"No req applied on corresponding SOF on sync link: %x",
 			sync_link->link_hdl);
 		sync_link->sync_link_sof_skip = false;
+		/*It is to manage compensate inject delay for each pd*/
+		__cam_req_mgr_check_link_is_ready(link, slot->idx, true, true);
 		return -EINVAL;
 	}
 
@@ -1123,8 +1167,8 @@ static int __cam_req_mgr_create_subdevs(
 {
 	int rc = 0;
 	*l_dev = (struct cam_req_mgr_connected_device *)
-		kzalloc(sizeof(struct cam_req_mgr_connected_device) * num_dev,
-		GFP_KERNEL);
+		kcalloc(num_dev, sizeof(struct cam_req_mgr_connected_device),
+			GFP_KERNEL);
 	if (!*l_dev)
 		rc = -ENOMEM;
 
@@ -1435,6 +1479,8 @@ int cam_req_mgr_process_flush_req(void *priv, void *data)
 		if (idx < 0) {
 			CAM_ERR(CAM_CRM, "req_id %lld not found in input queue",
 			flush_info->req_id);
+			mutex_unlock(&link->req.lock);
+			return -EINVAL;
 		} else {
 			CAM_DBG(CAM_CRM, "req_id %lld found at idx %d",
 				flush_info->req_id, idx);
@@ -1513,6 +1559,7 @@ int cam_req_mgr_process_sched_req(void *priv, void *data)
 	slot->sync_mode = sched_req->sync_mode;
 	slot->skip_idx = 0;
 	slot->recover = sched_req->bubble_enable;
+	link->open_req_cnt++;
 	__cam_req_mgr_inc_idx(&in_q->wr_idx, 1, in_q->num_slots);
 	mutex_unlock(&link->req.lock);
 
@@ -1687,8 +1734,8 @@ int cam_req_mgr_process_error(void *priv, void *data)
 					evt_data.u.error = err_info->error;
 					if (device->ops &&
 						device->ops->process_evt)
-						rc = device->ops->
-							process_evt(&evt_data);
+						rc = device->ops->process_evt(
+							&evt_data);
 				}
 			}
 			/* Bring processing pointer to bubbled req id */

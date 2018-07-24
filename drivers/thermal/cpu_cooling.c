@@ -224,7 +224,7 @@ EXPORT_SYMBOL_GPL(cpufreq_cooling_get_level);
 static int cpufreq_cooling_pm_notify(struct notifier_block *nb,
 				unsigned long mode, void *_unused)
 {
-	struct cpufreq_cooling_device *cpufreq_dev;
+	struct cpufreq_cooling_device *cpufreq_dev, *next;
 	unsigned int cpu;
 
 	switch (mode) {
@@ -236,8 +236,8 @@ static int cpufreq_cooling_pm_notify(struct notifier_block *nb,
 	case PM_POST_HIBERNATION:
 	case PM_POST_RESTORE:
 	case PM_POST_SUSPEND:
-		mutex_lock(&cooling_list_lock);
-		list_for_each_entry(cpufreq_dev, &cpufreq_dev_list, node) {
+		list_for_each_entry_safe(cpufreq_dev, next, &cpufreq_dev_list,
+						node) {
 			mutex_lock(&core_isolate_lock);
 			if (cpufreq_dev->cpufreq_state ==
 				cpufreq_dev->max_level) {
@@ -259,7 +259,6 @@ static int cpufreq_cooling_pm_notify(struct notifier_block *nb,
 			}
 			mutex_unlock(&core_isolate_lock);
 		}
-		mutex_unlock(&cooling_list_lock);
 
 		atomic_set(&in_suspend, 0);
 		break;
@@ -1098,8 +1097,9 @@ __cpufreq_cooling_register(struct device_node *np,
 
 	/* Last level will indicate the core will be isolated. */
 	cpufreq_dev->max_level++;
-	cpufreq_dev->freq_table = kzalloc(sizeof(*cpufreq_dev->freq_table) *
-					  cpufreq_dev->max_level, GFP_KERNEL);
+	cpufreq_dev->freq_table = kcalloc(cpufreq_dev->max_level,
+					  sizeof(*cpufreq_dev->freq_table),
+					  GFP_KERNEL);
 	if (!cpufreq_dev->freq_table) {
 		cool_dev = ERR_PTR(-ENOMEM);
 		goto free_time_in_idle_timestamp;

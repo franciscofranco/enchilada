@@ -414,16 +414,23 @@ void sde_connector_schedule_status_work(struct drm_connector *connector,
 	if (!c_conn)
 		return;
 
+	/* Return if there is no change in ESD status check condition */
+	if (en == c_conn->esd_status_check)
+		return;
+
 	sde_connector_get_info(connector, &info);
 	if (c_conn->ops.check_status &&
 		(info.capabilities & MSM_DISPLAY_ESD_ENABLED)) {
-		if (en)
+		if (en) {
 			/* Schedule ESD status check */
 			schedule_delayed_work(&c_conn->status_work,
 				msecs_to_jiffies(STATUS_CHECK_INTERVAL_MS));
-		else
+			c_conn->esd_status_check = true;
+		} else {
 			/* Cancel any pending ESD status check */
 			cancel_delayed_work_sync(&c_conn->status_work);
+			c_conn->esd_status_check = false;
+		}
 	}
 }
 
@@ -472,11 +479,12 @@ static int _sde_connector_update_power_locked(struct sde_connector *c_conn)
 	}
 	c_conn->last_panel_power_mode = mode;
 
-	if (mode != SDE_MODE_DPMS_ON) {
-		mutex_unlock(&c_conn->lock);
+	mutex_unlock(&c_conn->lock);
+	if (mode != SDE_MODE_DPMS_ON)
 		sde_connector_schedule_status_work(connector, false);
-		mutex_lock(&c_conn->lock);
-    }
+	else
+		sde_connector_schedule_status_work(connector, true);
+	mutex_lock(&c_conn->lock);
 
 	return rc;
 }
@@ -943,34 +951,38 @@ static int _sde_connector_set_ext_hdr_info(
 	struct sde_connector_state *c_state,
 	void *usr_ptr)
 {
+	int rc = 0;
 	struct drm_connector *connector;
 	struct drm_msm_ext_hdr_metadata *hdr_meta;
 	int i;
 
 	if (!c_conn || !c_state) {
 		SDE_ERROR_CONN(c_conn, "invalid args\n");
-		return -EINVAL;
+		rc = -EINVAL;
+		goto end;
 	}
 
 	connector = &c_conn->base;
 
 	if (!connector->hdr_supported) {
 		SDE_ERROR_CONN(c_conn, "sink doesn't support HDR\n");
-		return -ENOTSUPP;
+		rc = -ENOTSUPP;
+		goto end;
 	}
 
 	memset(&c_state->hdr_meta, 0, sizeof(c_state->hdr_meta));
 
 	if (!usr_ptr) {
 		SDE_DEBUG_CONN(c_conn, "hdr metadata cleared\n");
-		return 0;
+		goto end;
 	}
 
 	if (copy_from_user(&c_state->hdr_meta,
 		(void __user *)usr_ptr,
 			sizeof(*hdr_meta))) {
 		SDE_ERROR_CONN(c_conn, "failed to copy hdr metadata\n");
-		return -EFAULT;
+		rc = -EFAULT;
+		goto end;
 	}
 
 	hdr_meta = &c_state->hdr_meta;
@@ -993,7 +1005,10 @@ static int _sde_connector_set_ext_hdr_info(
 				   hdr_meta->display_primaries_y[i]);
 	}
 
-	return 0;
+	if (c_conn->ops.config_hdr)
+		rc = c_conn->ops.config_hdr(c_conn->display, c_state);
+end:
+	return rc;
 }
 
 static int sde_connector_atomic_set_property(struct drm_connector *connector,

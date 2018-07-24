@@ -316,6 +316,20 @@ First Level Node - FG Gen3 device
 		    discharging. If not specified, a value of 0 will be set.
 		    Allowed range is from 245 to 62256.
 
+- qcom,ki-coeff-low-dischg
+	Usage:      optional
+	Value type: <u32>
+	Definition: Ki coefficient value for low discharge current during
+		    discharging. Value has no unit. Allowed range is 0-62200
+		    in micro units.
+
+- qcom,ki-coeff-hi-chg
+	Usage:      optional
+	Value type: <u32>
+	Definition: Ki coefficient value for high charge current during
+		    charging. Value has no unit. Allowed range is 0-62200
+		    in micro units.
+
 - qcom,fg-rconn-mohms
 	Usage:      optional
 	Value type: <u32>
@@ -359,7 +373,7 @@ First Level Node - FG Gen3 device
 	Value type: <u32>
 	Definition: Value in micro percentage for low temperature ESR tight
 		    filter. If this is not specified, then a default value of
-		    48829 (4.88 %) will be used. Lowest possible value is 1954
+		    30000 (3 %) will be used. Lowest possible value is 1954
 		    (0.19 %).
 
 - qcom,fg-esr-broad-lt-filter-micro-pct
@@ -367,7 +381,7 @@ First Level Node - FG Gen3 device
 	Value type: <u32>
 	Definition: Value in micro percentage for low temperature ESR broad
 		    filter. If this is not specified, then a default value of
-		    148438 (14.84 %) will be used. Lowest possible value is
+		    30000 (3 %) will be used. Lowest possible value is
 		    1954 (0.19 %).
 
 - qcom,fg-auto-recharge-soc

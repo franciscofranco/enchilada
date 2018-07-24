@@ -357,7 +357,7 @@ static int cmdq_host_alloc_tdl(struct cmdq_host *cq_host)
 	if (!cq_host->desc_base || !cq_host->trans_desc_base)
 		return -ENOMEM;
 
-	pr_info("desc-base: 0x%p trans-base: 0x%p\n desc_dma 0x%llx trans_dma: 0x%llx\n",
+	pr_debug("desc-base: 0x%pK trans-base: 0x%pK\n desc_dma 0x%llx trans_dma: 0x%llx\n",
 		 cq_host->desc_base, cq_host->trans_desc_base,
 		(unsigned long long)cq_host->desc_dma_base,
 		(unsigned long long) cq_host->trans_desc_dma_base);
@@ -1371,8 +1371,9 @@ int cmdq_init(struct cmdq_host *cq_host, struct mmc_host *mmc,
 	mmc->num_cq_slots = NUM_SLOTS;
 	mmc->dcmd_cq_slot = DCMD_SLOT;
 
-	cq_host->mrq_slot = kzalloc(sizeof(cq_host->mrq_slot) *
-				    cq_host->num_slots, GFP_KERNEL);
+	cq_host->mrq_slot = kcalloc(cq_host->num_slots,
+				    sizeof(cq_host->mrq_slot),
+				    GFP_KERNEL);
 	if (!cq_host->mrq_slot)
 		return -ENOMEM;
 

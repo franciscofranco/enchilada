@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2013-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011, 2013-2018, The Linux Foundation. All rights reserved.
  * Linux Foundation chooses to take subject only to the GPLv2 license terms,
  * and distributes only under these terms.
  *
@@ -1251,6 +1251,7 @@ ssize_t f_cdev_write(struct file *file,
 		ret = -EFAULT;
 	} else {
 		req->length = xfer_size;
+		req->zero = 1;
 		ret = usb_ep_queue(in, req, GFP_KERNEL);
 		if (ret) {
 			pr_err("EP QUEUE failed:%d\n", ret);
@@ -1661,7 +1662,7 @@ static ssize_t usb_cser_status_show(struct config_item *item, char *page)
 	int temp = 0;
 	int ret;
 
-	buf = kzalloc(sizeof(char) * 512, GFP_KERNEL);
+	buf = kzalloc(512, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -89,6 +89,8 @@
 #define IPA_DPS_HPS_SEQ_TYPE_PKT_PROCESS_DEC_UCP 0x00000013
 /* 2 Packet Processing pass + no decipher + uCP */
 #define IPA_DPS_HPS_SEQ_TYPE_2ND_PKT_PROCESS_PASS_NO_DEC_UCP 0x00000004
+/* 2 Packet Processing pass + no decipher + uCP + HPS REP DMA Parser. */
+#define IPA_DPS_HPS_REP_SEQ_TYPE_2PKT_PROC_PASS_NO_DEC_UCP_DMAP 0x00000804
 /* 2 Packet Processing pass + decipher + uCP */
 #define IPA_DPS_HPS_SEQ_TYPE_2ND_PKT_PROCESS_PASS_DEC_UCP 0x00000015
 /* Packet Processing + no decipher + no uCP */
@@ -963,12 +965,12 @@ static const struct ipa_ep_configuration ipa3_ep_mapping
 	/* IPA_3_5_1 */
 	[IPA_3_5_1][IPA_CLIENT_WLAN1_PROD]          = {
 			true, IPA_v3_5_GROUP_UL_DL, true,
-			IPA_DPS_HPS_SEQ_TYPE_2ND_PKT_PROCESS_PASS_NO_DEC_UCP,
+			IPA_DPS_HPS_REP_SEQ_TYPE_2PKT_PROC_PASS_NO_DEC_UCP_DMAP,
 			QMB_MASTER_SELECT_DDR,
 			{ 7, 1, 8, 16, IPA_EE_UC } },
 	[IPA_3_5_1][IPA_CLIENT_USB_PROD]            = {
 			true, IPA_v3_5_GROUP_UL_DL, true,
-			IPA_DPS_HPS_SEQ_TYPE_2ND_PKT_PROCESS_PASS_NO_DEC_UCP,
+			IPA_DPS_HPS_REP_SEQ_TYPE_2PKT_PROC_PASS_NO_DEC_UCP_DMAP,
 			QMB_MASTER_SELECT_DDR,
 			{ 0, 0, 8, 16, IPA_EE_AP } },
 	[IPA_3_5_1][IPA_CLIENT_APPS_LAN_PROD] = {
@@ -978,7 +980,7 @@ static const struct ipa_ep_configuration ipa3_ep_mapping
 			{ 8, 7, 8, 16, IPA_EE_AP } },
 	[IPA_3_5_1][IPA_CLIENT_APPS_WAN_PROD] = {
 			true, IPA_v3_5_GROUP_UL_DL, true,
-			IPA_DPS_HPS_SEQ_TYPE_2ND_PKT_PROCESS_PASS_NO_DEC_UCP,
+			IPA_DPS_HPS_REP_SEQ_TYPE_2PKT_PROC_PASS_NO_DEC_UCP_DMAP,
 			QMB_MASTER_SELECT_DDR,
 			{ 2, 3, 16, 32, IPA_EE_AP } },
 	[IPA_3_5_1][IPA_CLIENT_APPS_CMD_PROD]		= {
@@ -3836,6 +3838,9 @@ static void ipa3_tag_free_skb(void *user1, int user2)
 }
 
 #define REQUIRED_TAG_PROCESS_DESCRIPTORS 4
+#define MAX_RETRY_ALLOC 10
+#define ALLOC_MIN_SLEEP_RX 100000
+#define ALLOC_MAX_SLEEP_RX 200000
 
 /* ipa3_tag_process() - Initiates a tag process. Incorporates the input
  * descriptors
@@ -3863,6 +3868,7 @@ int ipa3_tag_process(struct ipa3_desc desc[],
 	int res;
 	struct ipa3_tag_completion *comp;
 	int ep_idx;
+	u32 retry_cnt = 0;
 
 	/* Not enough room for the required descriptors for the tag process */
 	if (IPA_TAG_MAX_DESC - descs_num < REQUIRED_TAG_PROCESS_DESCRIPTORS) {
@@ -3880,7 +3886,7 @@ int ipa3_tag_process(struct ipa3_desc desc[],
 	}
 	sys = ipa3_ctx->ep[ep_idx].sys;
 
-	tag_desc = kzalloc(sizeof(*tag_desc) * IPA_TAG_MAX_DESC, GFP_KERNEL);
+	tag_desc = kcalloc(IPA_TAG_MAX_DESC, sizeof(*tag_desc), GFP_KERNEL);
 	if (!tag_desc) {
 		IPAERR("failed to allocate memory\n");
 		return -ENOMEM;
@@ -3968,10 +3974,22 @@ int ipa3_tag_process(struct ipa3_desc desc[],
 	tag_desc[desc_idx].callback = ipa3_tag_free_skb;
 	tag_desc[desc_idx].user1 = dummy_skb;
 	desc_idx++;
-
+retry_alloc:
 	/* send all descriptors to IPA with single EOT */
 	res = ipa3_send(sys, desc_idx, tag_desc, true);
 	if (res) {
+		if (res == -ENOMEM) {
+			if (retry_cnt < MAX_RETRY_ALLOC) {
+				IPADBG(
+				"failed to alloc memory retry cnt = %d\n",
+					retry_cnt);
+				retry_cnt++;
+				usleep_range(ALLOC_MIN_SLEEP_RX,
+					ALLOC_MAX_SLEEP_RX);
+				goto retry_alloc;
+			}
+
+		}
 		IPAERR("failed to send TAG packets %d\n", res);
 		res = -ENOMEM;
 		goto fail_free_skb;

@@ -155,7 +155,7 @@ out:
 static int
 smb2_reconnect(__le16 smb2_command, struct cifs_tcon *tcon)
 {
-	int rc = 0;
+	int rc;
 	struct nls_table *nls_codepage;
 	struct cifs_ses *ses;
 	struct TCP_Server_Info *server;
@@ -166,10 +166,10 @@ smb2_reconnect(__le16 smb2_command, struct cifs_tcon *tcon)
 	 * for those three - in the calling routine.
 	 */
 	if (tcon == NULL)
-		return rc;
+		return 0;
 
 	if (smb2_command == SMB2_TREE_CONNECT)
-		return rc;
+		return 0;
 
 	if (tcon->tidStatus == CifsExiting) {
 		/*
@@ -212,8 +212,14 @@ smb2_reconnect(__le16 smb2_command, struct cifs_tcon *tcon)
 			return -EAGAIN;
 		}
 
-		wait_event_interruptible_timeout(server->response_q,
-			(server->tcpStatus != CifsNeedReconnect), 10 * HZ);
+		rc = wait_event_interruptible_timeout(server->response_q,
+						      (server->tcpStatus != CifsNeedReconnect),
+						      10 * HZ);
+		if (rc < 0) {
+			cifs_dbg(FYI, "%s: aborting reconnect due to a received"
+				 " signal by the process\n", __func__);
+			return -ERESTARTSYS;
+		}
 
 		/* are we still trying to reconnect? */
 		if (server->tcpStatus != CifsNeedReconnect)
@@ -231,7 +237,7 @@ smb2_reconnect(__le16 smb2_command, struct cifs_tcon *tcon)
 	}
 
 	if (!tcon->ses->need_reconnect && !tcon->need_reconnect)
-		return rc;
+		return 0;
 
 	nls_codepage = load_nls_default();
 
@@ -2742,7 +2748,7 @@ send_set_info(const unsigned int xid, struct cifs_tcon *tcon,
 	if (!num)
 		return -EINVAL;
 
-	iov = kmalloc(sizeof(struct kvec) * num, GFP_KERNEL);
+	iov = kmalloc_array(num, sizeof(struct kvec), GFP_KERNEL);
 	if (!iov)
 		return -ENOMEM;
 
@@ -2800,7 +2806,7 @@ SMB2_rename(const unsigned int xid, struct cifs_tcon *tcon,
 	int rc;
 	int len = (2 * UniStrnlen((wchar_t *)target_file, PATH_MAX));
 
-	data = kmalloc(sizeof(void *) * 2, GFP_KERNEL);
+	data = kmalloc_array(2, sizeof(void *), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 
@@ -2848,7 +2854,7 @@ SMB2_set_hardlink(const unsigned int xid, struct cifs_tcon *tcon,
 	int rc;
 	int len = (2 * UniStrnlen((wchar_t *)target_file, PATH_MAX));
 
-	data = kmalloc(sizeof(void *) * 2, GFP_KERNEL);
+	data = kmalloc_array(2, sizeof(void *), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 

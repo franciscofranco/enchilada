@@ -364,7 +364,8 @@ out:
 }
 
 static int devfreq_cpufreq_get_freq(struct devfreq *df,
-					unsigned long *freq)
+					unsigned long *freq,
+					u32 *flag)
 {
 	unsigned int cpu, tgt_freq = 0;
 	struct devfreq_node *node;
@@ -585,7 +586,7 @@ static struct freq_map *read_tbl(struct device_node *of_node, char *prop_name)
 		return NULL;
 	nf = len / NUM_COLS;
 
-	tbl = kzalloc((nf + 1) * sizeof(*tbl), GFP_KERNEL);
+	tbl = kcalloc(nf + 1, sizeof(*tbl), GFP_KERNEL);
 	if (!tbl)
 		return NULL;
 
@@ -622,7 +623,7 @@ static int add_table_from_of(struct device_node *of_node)
 
 	common_tbl = read_tbl(of_node, PROP_TABLE);
 	if (!common_tbl) {
-		tbl_list = kzalloc(sizeof(*tbl_list) * NR_CPUS, GFP_KERNEL);
+		tbl_list = kcalloc(NR_CPUS, sizeof(*tbl_list), GFP_KERNEL);
 		if (!tbl_list) {
 			ret = -ENOMEM;
 			goto err_list;

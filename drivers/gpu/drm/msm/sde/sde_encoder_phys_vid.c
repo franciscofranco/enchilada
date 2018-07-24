@@ -245,9 +245,10 @@ static void programmable_fetch_config(struct sde_encoder_phys *phys_enc,
  *	HW layer requires VSYNC counter of first pixel of tgt VFP line.
  * @phys_enc: Pointer to physical encoder
  * @rot_fetch_lines: number of line to prefill, or 0 to disable
+ * @is_primary: set true if the display is primary display
  */
 static void programmable_rot_fetch_config(struct sde_encoder_phys *phys_enc,
-		u32 rot_fetch_lines)
+		u32 rot_fetch_lines, u32 is_primary)
 {
 	struct sde_encoder_phys_vid *vid_enc =
 		to_sde_encoder_phys_vid(phys_enc);
@@ -264,7 +265,8 @@ static void programmable_rot_fetch_config(struct sde_encoder_phys *phys_enc,
 			!phys_enc->hw_ctl->ops.get_bitmask_intf ||
 			!phys_enc->hw_ctl->ops.update_pending_flush ||
 			!vid_enc->hw_intf->ops.setup_rot_start ||
-			!phys_enc->sde_kms)
+			!phys_enc->sde_kms ||
+			!is_primary)
 		return;
 
 	timing = &vid_enc->timing_params;
@@ -507,8 +509,11 @@ static bool _sde_encoder_phys_is_dual_ctl(struct sde_encoder_phys *phys_enc)
 static bool sde_encoder_phys_vid_needs_single_flush(
 		struct sde_encoder_phys *phys_enc)
 {
-	return phys_enc && (_sde_encoder_phys_is_ppsplit(phys_enc) ||
-		_sde_encoder_phys_is_dual_ctl(phys_enc));
+	return phys_enc && (
+		phys_enc->cont_splash_settings ?
+		phys_enc->cont_splash_single_flush :
+		(_sde_encoder_phys_is_ppsplit(phys_enc) ||
+		_sde_encoder_phys_is_dual_ctl(phys_enc)));
 }
 
 static void _sde_encoder_phys_vid_setup_irq_hw_idx(
@@ -874,7 +879,8 @@ static int sde_encoder_phys_vid_prepare_for_kickoff(
 		vid_enc->error_count = 0;
 	}
 
-	programmable_rot_fetch_config(phys_enc, params->inline_rotate_prefill);
+	programmable_rot_fetch_config(phys_enc,
+			params->inline_rotate_prefill, params->is_primary);
 
 	return rc;
 }

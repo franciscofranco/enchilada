@@ -1,4 +1,4 @@
-/* Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -19,9 +19,17 @@
 #include <soc/qcom/system_pm.h>
 
 #include <clocksource/arm_arch_timer.h>
+#include "rpmh_master_stat.h"
 
 #define PDC_TIME_VALID_SHIFT	31
 #define PDC_TIME_UPPER_MASK	0xFFFFFF
+
+#ifdef CONFIG_ARM_GIC_V3
+#include <linux/irqchip/arm-gic-v3.h>
+#else
+static inline void gic_v3_dist_restore(void) {}
+static inline void gic_v3_dist_save(void) {}
+#endif
 
 static struct rpmh_client *rpmh_client;
 
@@ -67,6 +75,7 @@ int system_sleep_enter(void)
 	if (IS_ERR_OR_NULL(rpmh_client))
 		return -EFAULT;
 
+	gic_v3_dist_save();
 	return rpmh_flush(rpmh_client);
 }
 EXPORT_SYMBOL(system_sleep_enter);
@@ -76,6 +85,8 @@ EXPORT_SYMBOL(system_sleep_enter);
  */
 void system_sleep_exit(void)
 {
+	gic_v3_dist_restore();
+	msm_rpmh_master_stats_update();
 }
 EXPORT_SYMBOL(system_sleep_exit);
 

@@ -509,7 +509,8 @@ static void drbd_calc_cpu_mask(cpumask_var_t *cpu_mask)
 {
 	unsigned int *resources_per_cpu, min_index = ~0;
 
-	resources_per_cpu = kzalloc(nr_cpu_ids * sizeof(*resources_per_cpu), GFP_KERNEL);
+	resources_per_cpu = kcalloc(nr_cpu_ids, sizeof(*resources_per_cpu),
+				    GFP_KERNEL);
 	if (resources_per_cpu) {
 		struct drbd_resource *resource;
 		unsigned int cpu, min = ~0;
@@ -2462,7 +2463,7 @@ static int drbd_congested(void *congested_data, int bdi_bits)
 
 	if (get_ldev(device)) {
 		q = bdev_get_queue(device->ldev->backing_bdev);
-		r = bdi_congested(&q->backing_dev_info, bdi_bits);
+		r = bdi_congested(q->backing_dev_info, bdi_bits);
 		put_ldev(device);
 		if (r)
 			reason = 'b';
@@ -2834,8 +2835,8 @@ enum drbd_ret_code drbd_create_device(struct drbd_config_context *adm_ctx, unsig
 	/* we have no partitions. we contain only ourselves. */
 	device->this_bdev->bd_contains = device->this_bdev;
 
-	q->backing_dev_info.congested_fn = drbd_congested;
-	q->backing_dev_info.congested_data = device;
+	q->backing_dev_info->congested_fn = drbd_congested;
+	q->backing_dev_info->congested_data = device;
 
 	blk_queue_make_request(q, drbd_make_request);
 	blk_queue_write_cache(q, true, true);

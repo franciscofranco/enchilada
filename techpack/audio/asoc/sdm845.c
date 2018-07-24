@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -116,19 +116,6 @@ enum {
 	AUX_PCM_MAX,
 };
 
-enum {
-	PCM_I2S_SEL_PRIM = 0,
-	PCM_I2S_SEL_SEC,
-	PCM_I2S_SEL_TERT,
-	PCM_I2S_SEL_QUAT,
-	PCM_I2S_SEL_MAX,
-};
-
-struct mi2s_aux_pcm_common_conf {
-	struct mutex lock;
-	void *pcm_i2s_sel_vt_addr;
-};
-
 struct mi2s_conf {
 	struct mutex lock;
 	u32 ref_cnt;
@@ -140,11 +127,6 @@ static u32 mi2s_ebit_clk[MI2S_MAX] = {
 	Q6AFE_LPASS_CLK_ID_SEC_MI2S_EBIT,
 	Q6AFE_LPASS_CLK_ID_TER_MI2S_EBIT,
 	Q6AFE_LPASS_CLK_ID_QUAD_MI2S_EBIT
-};
-
-struct auxpcm_conf {
-	struct mutex lock;
-	u32 ref_cnt;
 };
 
 struct dev_config {
@@ -585,9 +567,7 @@ static struct afe_clk_set mi2s_clk[MI2S_MAX] = {
 	}
 };
 
-static struct mi2s_aux_pcm_common_conf mi2s_auxpcm_conf[PCM_I2S_SEL_MAX];
 static struct mi2s_conf mi2s_intf_conf[MI2S_MAX];
-static struct auxpcm_conf auxpcm_intf_conf[AUX_PCM_MAX];
 
 static int slim_get_sample_rate_val(int sample_rate)
 {
@@ -3923,7 +3903,12 @@ static void *def_tavil_mbhc_cal(void)
 		return NULL;
 
 #define S(X, Y) ((WCD_MBHC_CAL_PLUG_TYPE_PTR(tavil_wcd_cal)->X) = (Y))
+#if 0
+/*wangdongdong@AudioDrv,2018-06-14,avoid JBL lock device not to enter standby*/
 	S(v_hs_max, 1600);
+#else
+	S(v_hs_max, 1700);
+#endif
 #undef S
 #define S(X, Y) ((WCD_MBHC_CAL_BTN_DET_PTR(tavil_wcd_cal)->X) = (Y))
 	S(num_btn, WCD_MBHC_DEF_BUTTONS);
@@ -4117,83 +4102,6 @@ static int msm_wcn_hw_params(struct snd_pcm_substream *substream,
 
 err:
 	return ret;
-}
-
-static int msm_aux_pcm_snd_startup(struct snd_pcm_substream *substream)
-{
-	int ret = 0;
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
-	int index = cpu_dai->id - 1;
-
-	dev_dbg(rtd->card->dev,
-		"%s: substream = %s  stream = %d, dai name %s, dai ID %d\n",
-		__func__, substream->name, substream->stream,
-		cpu_dai->name, cpu_dai->id);
-
-	if (index < PRIM_AUX_PCM || index > QUAT_AUX_PCM) {
-		ret = -EINVAL;
-		dev_err(rtd->card->dev,
-			"%s: CPU DAI id (%d) out of range\n",
-			__func__, cpu_dai->id);
-		goto err;
-	}
-
-	mutex_lock(&auxpcm_intf_conf[index].lock);
-	if (++auxpcm_intf_conf[index].ref_cnt == 1) {
-		if (mi2s_auxpcm_conf[index].pcm_i2s_sel_vt_addr != NULL) {
-			mutex_lock(&mi2s_auxpcm_conf[index].lock);
-			iowrite32(1,
-				mi2s_auxpcm_conf[index].pcm_i2s_sel_vt_addr);
-			mutex_unlock(&mi2s_auxpcm_conf[index].lock);
-		} else {
-			dev_err(rtd->card->dev,
-				"%s lpaif_tert_muxsel_virt_addr is NULL\n",
-				__func__);
-			ret = -EINVAL;
-		}
-	}
-	if (ret < 0)
-		auxpcm_intf_conf[index].ref_cnt--;
-
-	mutex_unlock(&auxpcm_intf_conf[index].lock);
-
-err:
-	return ret;
-}
-
-static void msm_aux_pcm_snd_shutdown(struct snd_pcm_substream *substream)
-{
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	int index = rtd->cpu_dai->id - 1;
-
-	dev_dbg(rtd->card->dev,
-		"%s: substream = %s  stream = %d, dai name %s, dai ID %d\n",
-		__func__,
-		substream->name, substream->stream,
-		rtd->cpu_dai->name, rtd->cpu_dai->id);
-
-	if (index < PRIM_AUX_PCM || index > QUAT_AUX_PCM) {
-		dev_err(rtd->card->dev,
-			"%s: CPU DAI id (%d) out of range\n",
-			__func__, rtd->cpu_dai->id);
-		return;
-	}
-
-	mutex_lock(&auxpcm_intf_conf[index].lock);
-	if (--auxpcm_intf_conf[index].ref_cnt == 0) {
-		if (mi2s_auxpcm_conf[index].pcm_i2s_sel_vt_addr != NULL) {
-			mutex_lock(&mi2s_auxpcm_conf[index].lock);
-			iowrite32(0,
-				mi2s_auxpcm_conf[index].pcm_i2s_sel_vt_addr);
-			mutex_unlock(&mi2s_auxpcm_conf[index].lock);
-		} else {
-			dev_err(rtd->card->dev,
-				"%s lpaif_tert_muxsel_virt_addr is NULL\n",
-				__func__);
-		}
-	}
-	mutex_unlock(&auxpcm_intf_conf[index].lock);
 }
 
 static int msm_get_port_id(int be_id)
@@ -4701,12 +4609,6 @@ static int msm_mi2s_snd_startup(struct snd_pcm_substream *substream)
 			__func__, cpu_dai->id);
 		goto err;
 	}
-	if (index == QUAT_MI2S) {
-		ret_pinctrl = msm_set_pinctrl(pinctrl_info, STATE_MI2S_ACTIVE);
-		if (ret_pinctrl)
-			pr_debug("%s: MI2S TLMM pinctrl set failed with %d\n",
-				__func__, ret_pinctrl);
-	}
 	/*
 	 * Muxtex protection in case the same MI2S
 	 * interface using for both TX and RX  so
@@ -4731,6 +4633,13 @@ static int msm_mi2s_snd_startup(struct snd_pcm_substream *substream)
 			pr_err("%s: set fmt cpu dai failed for MI2S (%d), err:%d\n",
 				__func__, index, ret);
 			goto clk_off;
+		}
+		if (index == QUAT_MI2S) {
+			ret_pinctrl = msm_set_pinctrl(pinctrl_info,
+						      STATE_MI2S_ACTIVE);
+			if (ret_pinctrl)
+				pr_err("%s: MI2S TLMM pinctrl set failed with %d\n",
+					__func__, ret_pinctrl);
 		}
 	}
 clk_off:
@@ -4767,25 +4676,21 @@ static void msm_mi2s_snd_shutdown(struct snd_pcm_substream *substream)
 		if (ret < 0)
 			pr_err("%s:clock disable failed for MI2S (%d); ret=%d\n",
 				__func__, index, ret);
+		if (index == QUAT_MI2S) {
+			ret_pinctrl = msm_set_pinctrl(pinctrl_info,
+						      STATE_DISABLE);
+			if (ret_pinctrl)
+				pr_err("%s: MI2S TLMM pinctrl set failed with %d\n",
+					__func__, ret_pinctrl);
+		}
 	}
 	mutex_unlock(&mi2s_intf_conf[index].lock);
 
-	if (index == QUAT_MI2S) {
-		ret_pinctrl = msm_set_pinctrl(pinctrl_info, STATE_DISABLE);
-		if (ret_pinctrl)
-			pr_debug("%s: MI2S TLMM pinctrl set failed with %d\n",
-				__func__, ret_pinctrl);
-	}
 }
 
 static struct snd_soc_ops msm_mi2s_be_ops = {
 	.startup = msm_mi2s_snd_startup,
 	.shutdown = msm_mi2s_snd_shutdown,
-};
-
-static struct snd_soc_ops msm_aux_pcm_be_ops = {
-	.startup = msm_aux_pcm_snd_startup,
-	.shutdown = msm_aux_pcm_snd_shutdown,
 };
 
 static struct snd_soc_ops msm_be_ops = {
@@ -6091,7 +5996,6 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
 		.ignore_pmdown_time = 1,
 		.ignore_suspend = 1,
-		.ops = &msm_aux_pcm_be_ops,
 	},
 	{
 		.name = LPASS_BE_AUXPCM_TX,
@@ -6106,7 +6010,6 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
 		.ignore_pmdown_time = 1,
 		.ignore_suspend = 1,
-		.ops = &msm_aux_pcm_be_ops,
 	},
 	/* Secondary AUX PCM Backend DAI Links */
 	{
@@ -6122,7 +6025,6 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
 		.ignore_pmdown_time = 1,
 		.ignore_suspend = 1,
-		.ops = &msm_aux_pcm_be_ops,
 	},
 	{
 		.name = LPASS_BE_SEC_AUXPCM_TX,
@@ -6137,7 +6039,6 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
 		.ignore_suspend = 1,
 		.ignore_pmdown_time = 1,
-		.ops = &msm_aux_pcm_be_ops,
 	},
 	/* Tertiary AUX PCM Backend DAI Links */
 	{
@@ -6153,7 +6054,6 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
 		.ignore_pmdown_time = 1,
 		.ignore_suspend = 1,
-		.ops = &msm_aux_pcm_be_ops,
 	},
 	{
 		.name = LPASS_BE_TERT_AUXPCM_TX,
@@ -6168,7 +6068,6 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
 		.ignore_suspend = 1,
 		.ignore_pmdown_time = 1,
-		.ops = &msm_aux_pcm_be_ops,
 	},
 	/* Quaternary AUX PCM Backend DAI Links */
 	{
@@ -6184,7 +6083,6 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
 		.ignore_pmdown_time = 1,
 		.ignore_suspend = 1,
-		.ops = &msm_aux_pcm_be_ops,
 	},
 	{
 		.name = LPASS_BE_QUAT_AUXPCM_TX,
@@ -6199,7 +6097,6 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
 		.ignore_suspend = 1,
 		.ignore_pmdown_time = 1,
-		.ops = &msm_aux_pcm_be_ops,
 	},
 };
 
@@ -6829,39 +6726,13 @@ err:
 
 static void msm_i2s_auxpcm_init(struct platform_device *pdev)
 {
-	struct resource *muxsel;
 	int count;
 	u32 mi2s_master_slave[MI2S_MAX];
 	int ret;
-	char *str[PCM_I2S_SEL_MAX] = {
-		"lpaif_pri_mode_muxsel",
-		"lpaif_sec_mode_muxsel",
-		"lpaif_tert_mode_muxsel",
-		"lpaif_quat_mode_muxsel"
-	};
 
 	for (count = 0; count < MI2S_MAX; count++) {
 		mutex_init(&mi2s_intf_conf[count].lock);
 		mi2s_intf_conf[count].ref_cnt = 0;
-	}
-
-	for (count = 0; count < AUX_PCM_MAX; count++) {
-		mutex_init(&auxpcm_intf_conf[count].lock);
-		auxpcm_intf_conf[count].ref_cnt = 0;
-	}
-
-	for (count = 0; count < PCM_I2S_SEL_MAX; count++) {
-		mutex_init(&mi2s_auxpcm_conf[count].lock);
-		mi2s_auxpcm_conf[count].pcm_i2s_sel_vt_addr = NULL;
-	}
-
-	for (count = 0; count < PCM_I2S_SEL_MAX; count++) {
-		muxsel = platform_get_resource_byname(pdev, IORESOURCE_MEM,
-						      str[count]);
-		if (muxsel) {
-			mi2s_auxpcm_conf[count].pcm_i2s_sel_vt_addr
-				= ioremap(muxsel->start, resource_size(muxsel));
-		}
 	}
 
 	ret = of_property_read_u32_array(pdev->dev.of_node,
@@ -6881,21 +6752,6 @@ static void msm_i2s_auxpcm_init(struct platform_device *pdev)
 static void msm_i2s_auxpcm_deinit(void)
 {
 	int count;
-
-	for (count = 0; count < PCM_I2S_SEL_MAX; count++) {
-		if (mi2s_auxpcm_conf[count].pcm_i2s_sel_vt_addr !=
-		    NULL) {
-			iounmap(
-			mi2s_auxpcm_conf[count].pcm_i2s_sel_vt_addr);
-			mi2s_auxpcm_conf[count].pcm_i2s_sel_vt_addr = NULL;
-		}
-		mutex_destroy(&mi2s_auxpcm_conf[count].lock);
-	}
-
-	for (count = 0; count < AUX_PCM_MAX; count++) {
-		mutex_destroy(&auxpcm_intf_conf[count].lock);
-		auxpcm_intf_conf[count].ref_cnt = 0;
-	}
 
 	for (count = 0; count < MI2S_MAX; count++) {
 		mutex_destroy(&mi2s_intf_conf[count].lock);

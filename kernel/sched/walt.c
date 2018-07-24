@@ -44,7 +44,7 @@ const char *migrate_type_names[] = {"GROUP_TO_RQ", "RQ_TO_GROUP",
 static struct cpu_cycle_counter_cb cpu_cycle_counter_cb;
 static bool use_cycle_counter;
 DEFINE_MUTEX(cluster_lock);
-static atomic64_t walt_irq_work_lastq_ws;
+atomic64_t walt_irq_work_lastq_ws;
 
 static struct irq_work walt_cpufreq_irq_work;
 static struct irq_work walt_migration_irq_work;
@@ -119,7 +119,6 @@ __read_mostly unsigned int sched_ravg_window = MIN_SCHED_RAVG_WINDOW;
 __read_mostly unsigned int walt_cpu_util_freq_divisor;
 
 /* Initial task load. Newly created tasks are assigned this load. */
-unsigned int __read_mostly sched_init_task_load_windows;
 unsigned int __read_mostly sysctl_sched_init_task_load_pct = 15;
 
 /*
@@ -302,10 +301,27 @@ int register_cpu_cycle_counter_cb(struct cpu_cycle_counter_cb *cb)
 	return 0;
 }
 
-static void update_task_cpu_cycles(struct task_struct *p, int cpu)
+/*
+ * Assumes rq_lock is held and wallclock was recorded in the same critical
+ * section as this function's invocation.
+ */
+static inline u64 read_cycle_counter(int cpu, u64 wallclock)
+{
+	struct rq *rq = cpu_rq(cpu);
+
+	if (rq->last_cc_update != wallclock) {
+		rq->cycles = cpu_cycle_counter_cb.get_cpu_cycle_counter(cpu);
+		rq->last_cc_update = wallclock;
+	}
+
+	return rq->cycles;
+}
+
+static void update_task_cpu_cycles(struct task_struct *p, int cpu,
+				   u64 wallclock)
 {
 	if (use_cycle_counter)
-		p->cpu_cycles = cpu_cycle_counter_cb.get_cpu_cycle_counter(cpu);
+		p->cpu_cycles = read_cycle_counter(cpu, wallclock);
 }
 
 void clear_ed_task(struct task_struct *p, struct rq *rq)
@@ -349,7 +365,7 @@ void sched_account_irqstart(int cpu, struct task_struct *curr, u64 wallclock)
 	if (is_idle_task(curr)) {
 		/* We're here without rq->lock held, IRQ disabled */
 		raw_spin_lock(&rq->lock);
-		update_task_cpu_cycles(curr, cpu);
+		update_task_cpu_cycles(curr, cpu, ktime_get_ns());
 		raw_spin_unlock(&rq->lock);
 	}
 }
@@ -758,7 +774,7 @@ void fixup_busy_time(struct task_struct *p, int new_cpu)
 	update_task_ravg(p, task_rq(p), TASK_MIGRATE,
 			 wallclock, 0);
 
-	update_task_cpu_cycles(p, new_cpu);
+	update_task_cpu_cycles(p, new_cpu, wallclock);
 
 	/*
 	 * When a task is migrating during the wakeup, adjust
@@ -1842,7 +1858,7 @@ update_task_rq_cpu_cycles(struct task_struct *p, struct rq *rq, int event,
 		return;
 	}
 
-	cur_cycles = cpu_cycle_counter_cb.get_cpu_cycle_counter(cpu);
+	cur_cycles = read_cycle_counter(cpu, wallclock);
 
 	/*
 	 * If current task is idle task and irqtime == 0 CPU was
@@ -1909,7 +1925,7 @@ void update_task_ravg(struct task_struct *p, struct rq *rq, int event,
 	old_window_start = update_window_start(rq, wallclock, event);
 
 	if (!p->ravg.mark_start) {
-		update_task_cpu_cycles(p, cpu_of(rq));
+		update_task_cpu_cycles(p, cpu_of(rq), wallclock);
 		goto done;
 	}
 
@@ -1946,8 +1962,8 @@ int sched_set_init_task_load(struct task_struct *p, int init_load_pct)
 void init_new_task_load(struct task_struct *p, bool idle_task)
 {
 	int i;
-	u32 init_load_windows = sched_init_task_load_windows;
-	u32 init_load_pct = current->init_load_pct;
+	u32 init_load_windows;
+	u32 init_load_pct;
 
 	p->init_load_pct = 0;
 	rcu_assign_pointer(p->grp, NULL);
@@ -1964,9 +1980,13 @@ void init_new_task_load(struct task_struct *p, bool idle_task)
 	if (idle_task)
 		return;
 
-	if (init_load_pct)
-		init_load_windows = div64_u64((u64)init_load_pct *
-			  (u64)sched_ravg_window, 100);
+	if (current->init_load_pct)
+		init_load_pct = current->init_load_pct;
+	else
+		init_load_pct = sysctl_sched_init_task_load_pct;
+
+	init_load_windows = div64_u64((u64)init_load_pct *
+				(u64)sched_ravg_window, 100);
 
 	p->ravg.demand = init_load_windows;
 	p->ravg.coloc_demand = init_load_windows;
@@ -2028,7 +2048,7 @@ void mark_task_starting(struct task_struct *p)
 	p->ravg.mark_start = p->last_wake_ts = wallclock;
 	p->last_enqueued_ts = wallclock;
 	p->last_switch_out_ts = 0;
-	update_task_cpu_cycles(p, cpu_of(rq));
+	update_task_cpu_cycles(p, cpu_of(rq), wallclock);
 }
 
 static cpumask_t all_cluster_cpus = CPU_MASK_NONE;
@@ -3232,6 +3252,8 @@ void walt_sched_init(struct rq *rq)
 	rq->curr_table = 0;
 	rq->prev_top = 0;
 	rq->curr_top = 0;
+	rq->last_cc_update = 0;
+	rq->cycles = 0;
 	for (j = 0; j < NUM_TRACKED_WINDOWS; j++) {
 		memset(&rq->load_subs[j], 0,
 				sizeof(struct load_subtractions));
@@ -3245,8 +3267,4 @@ void walt_sched_init(struct rq *rq)
 
 	walt_cpu_util_freq_divisor =
 	    (sched_ravg_window >> SCHED_CAPACITY_SHIFT) * 100;
-
-	sched_init_task_load_windows =
-		div64_u64((u64)sysctl_sched_init_task_load_pct *
-			  (u64)sched_ravg_window, 100);
 }

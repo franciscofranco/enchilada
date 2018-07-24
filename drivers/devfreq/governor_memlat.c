@@ -225,7 +225,8 @@ static void gov_stop(struct devfreq *df)
 }
 
 static int devfreq_memlat_get_freq(struct devfreq *df,
-					unsigned long *freq)
+					unsigned long *freq,
+					u32 *flag)
 {
 	int i, lat_dev = 0;
 	struct memlat_node *node = df->data;
@@ -371,8 +372,8 @@ static struct core_dev_map *init_core_dev_map(struct device *dev,
 		return NULL;
 	nf = len / NUM_COLS;
 
-	tbl = devm_kzalloc(dev, (nf + 1) * sizeof(struct core_dev_map),
-			GFP_KERNEL);
+	tbl = devm_kcalloc(dev, nf + 1, sizeof(struct core_dev_map),
+			   GFP_KERNEL);
 	if (!tbl)
 		return NULL;
 

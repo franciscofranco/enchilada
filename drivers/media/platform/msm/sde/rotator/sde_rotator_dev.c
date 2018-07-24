@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -286,8 +286,9 @@ static int sde_rotator_queue_setup(struct vb2_queue *q,
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
 		ctx->nbuf_out = *num_buffers;
 		kfree(ctx->vbinfo_out);
-		ctx->vbinfo_out = kzalloc(sizeof(struct sde_rotator_vbinfo) *
-					ctx->nbuf_out, GFP_KERNEL);
+		ctx->vbinfo_out = kcalloc(ctx->nbuf_out,
+					  sizeof(struct sde_rotator_vbinfo),
+					  GFP_KERNEL);
 		if (!ctx->vbinfo_out)
 			return -ENOMEM;
 		for (i = 0; i < ctx->nbuf_out; i++) {
@@ -299,8 +300,9 @@ static int sde_rotator_queue_setup(struct vb2_queue *q,
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
 		ctx->nbuf_cap = *num_buffers;
 		kfree(ctx->vbinfo_cap);
-		ctx->vbinfo_cap = kzalloc(sizeof(struct sde_rotator_vbinfo) *
-					ctx->nbuf_cap, GFP_KERNEL);
+		ctx->vbinfo_cap = kcalloc(ctx->nbuf_cap,
+					  sizeof(struct sde_rotator_vbinfo),
+					  GFP_KERNEL);
 		if (!ctx->vbinfo_cap)
 			return -ENOMEM;
 		for (i = 0; i < ctx->nbuf_cap; i++) {
@@ -1075,6 +1077,7 @@ error_m2m_init:
 	mutex_unlock(&rot_dev->lock);
 error_lock:
 	kfree(ctx);
+	ctx = NULL;
 	return ERR_PTR(ret);
 }
 
@@ -1087,9 +1090,17 @@ error_lock:
 static int sde_rotator_ctx_release(struct sde_rotator_ctx *ctx,
 		struct file *file)
 {
-	struct sde_rotator_device *rot_dev = ctx->rot_dev;
-	u32 session_id = ctx->session_id;
+	struct sde_rotator_device *rot_dev;
+	u32 session_id;
 	struct list_head *curr, *next;
+
+	if (!ctx) {
+		SDEROT_DBG("ctx is NULL\n");
+		return -EINVAL;
+	}
+
+	rot_dev = ctx->rot_dev;
+	session_id = ctx->session_id;
 
 	ATRACE_END(ctx->kobj.name);
 

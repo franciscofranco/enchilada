@@ -342,6 +342,7 @@ struct smb_charger {
 	struct delayed_work	op_check_apsd_work;
 	struct work_struct	get_aicl_work;
 	struct delayed_work	dash_check_work;
+	struct delayed_work	revertboost_recovery_work;
 	struct wakeup_source	chg_wake_lock;
 	struct delayed_work	clear_hdc_work;
 	struct work_struct	otg_oc_work;
@@ -470,6 +471,7 @@ struct smb_charger {
 	bool			try_sink_active;
 	int			boost_current_ua;
 	int			temp_speed_reading_count;
+	bool			fake_usb_insertion;
 
 	/* extcon for VBUS / ID notification to USB for uUSB */
 	struct extcon_dev	*extcon;

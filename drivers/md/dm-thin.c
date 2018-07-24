@@ -2722,7 +2722,7 @@ static int pool_is_congested(struct dm_target_callbacks *cb, int bdi_bits)
 		return 1;
 
 	q = bdev_get_queue(pt->data_dev->bdev);
-	return bdi_congested(&q->backing_dev_info, bdi_bits);
+	return bdi_congested(q->backing_dev_info, bdi_bits);
 }
 
 static void requeue_bios(struct pool *pool)
@@ -2946,7 +2946,7 @@ static struct pool *pool_create(struct mapped_device *pool_md,
 		goto bad_mapping_pool;
 	}
 
-	pool->cell_sort_array = vmalloc(sizeof(*pool->cell_sort_array) * CELL_SORT_ARRAY_SIZE);
+	pool->cell_sort_array = vmalloc(array_size(CELL_SORT_ARRAY_SIZE, sizeof(*pool->cell_sort_array)));
 	if (!pool->cell_sort_array) {
 		*error = "Error allocating cell sort array";
 		err_p = ERR_PTR(-ENOMEM);

@@ -2250,7 +2250,7 @@ static int resize_stripes(struct r5conf *conf, int newsize)
 	 * is completely stalled, so now is a good time to resize
 	 * conf->disks and the scribble region
 	 */
-	ndisks = kzalloc(newsize * sizeof(struct disk_info), GFP_NOIO);
+	ndisks = kcalloc(newsize, sizeof(struct disk_info), GFP_NOIO);
 	if (ndisks) {
 		for (i=0; i<conf->raid_disks; i++)
 			ndisks[i] = conf->disks[i];
@@ -6164,10 +6164,10 @@ raid5_store_skip_copy(struct mddev *mddev, const char *page, size_t len)
 		mddev_suspend(mddev);
 		conf->skip_copy = new;
 		if (new)
-			mddev->queue->backing_dev_info.capabilities |=
+			mddev->queue->backing_dev_info->capabilities |=
 				BDI_CAP_STABLE_WRITES;
 		else
-			mddev->queue->backing_dev_info.capabilities &=
+			mddev->queue->backing_dev_info->capabilities &=
 				~BDI_CAP_STABLE_WRITES;
 		mddev_resume(mddev);
 	}
@@ -6294,9 +6294,9 @@ static int alloc_thread_groups(struct r5conf *conf, int cnt,
 	}
 	*group_cnt = num_possible_nodes();
 	size = sizeof(struct r5worker) * cnt;
-	workers = kzalloc(size * *group_cnt, GFP_NOIO);
-	*worker_groups = kzalloc(sizeof(struct r5worker_group) *
-				*group_cnt, GFP_NOIO);
+	workers = kcalloc(size, *group_cnt, GFP_NOIO);
+	*worker_groups = kcalloc(*group_cnt, sizeof(struct r5worker_group),
+				 GFP_NOIO);
 	if (!*worker_groups || !workers) {
 		kfree(workers);
 		kfree(*worker_groups);
@@ -6548,7 +6548,7 @@ static struct r5conf *setup_conf(struct mddev *mddev)
 		conf->previous_raid_disks = mddev->raid_disks - mddev->delta_disks;
 	max_disks = max(conf->raid_disks, conf->previous_raid_disks);
 
-	conf->disks = kzalloc(max_disks * sizeof(struct disk_info),
+	conf->disks = kcalloc(max_disks, sizeof(struct disk_info),
 			      GFP_KERNEL);
 	if (!conf->disks)
 		goto abort;
@@ -6993,8 +6993,8 @@ static int raid5_run(struct mddev *mddev)
 		int data_disks = conf->previous_raid_disks - conf->max_degraded;
 		int stripe = data_disks *
 			((mddev->chunk_sectors << 9) / PAGE_SIZE);
-		if (mddev->queue->backing_dev_info.ra_pages < 2 * stripe)
-			mddev->queue->backing_dev_info.ra_pages = 2 * stripe;
+		if (mddev->queue->backing_dev_info->ra_pages < 2 * stripe)
+			mddev->queue->backing_dev_info->ra_pages = 2 * stripe;
 
 		chunk_size = mddev->chunk_sectors << 9;
 		blk_queue_io_min(mddev->queue, chunk_size);
@@ -7600,8 +7600,8 @@ static void end_reshape(struct r5conf *conf)
 			int data_disks = conf->raid_disks - conf->max_degraded;
 			int stripe = data_disks * ((conf->chunk_sectors << 9)
 						   / PAGE_SIZE);
-			if (conf->mddev->queue->backing_dev_info.ra_pages < 2 * stripe)
-				conf->mddev->queue->backing_dev_info.ra_pages = 2 * stripe;
+			if (conf->mddev->queue->backing_dev_info->ra_pages < 2 * stripe)
+				conf->mddev->queue->backing_dev_info->ra_pages = 2 * stripe;
 		}
 	}
 }

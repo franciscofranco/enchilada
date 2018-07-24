@@ -1692,7 +1692,7 @@ static int fanout_add(struct sock *sk, u16 id, u16 type_flags)
 		match->flags = flags;
 		INIT_LIST_HEAD(&match->list);
 		spin_lock_init(&match->lock);
-		atomic_set(&match->sk_ref, 0);
+		refcount_set(&match->sk_ref, 0);
 		fanout_init_data(match);
 		match->prot_hook.type = po->prot_hook.type;
 		match->prot_hook.dev = po->prot_hook.dev;
@@ -1709,19 +1709,19 @@ static int fanout_add(struct sock *sk, u16 id, u16 type_flags)
 	    match->prot_hook.type == po->prot_hook.type &&
 	    match->prot_hook.dev == po->prot_hook.dev) {
 		err = -ENOSPC;
-		if (atomic_read(&match->sk_ref) < PACKET_FANOUT_MAX) {
+		if (refcount_read(&match->sk_ref) < PACKET_FANOUT_MAX) {
 			__dev_remove_pack(&po->prot_hook);
 			po->fanout = match;
 			po->rollover = rollover;
 			rollover = NULL;
-			atomic_inc(&match->sk_ref);
+			refcount_set(&match->sk_ref, refcount_read(&match->sk_ref) + 1);
 			__fanout_link(sk, po);
 			err = 0;
 		}
 	}
 	spin_unlock(&po->bind_lock);
 
-	if (err && !atomic_read(&match->sk_ref)) {
+	if (err && !refcount_read(&match->sk_ref)) {
 		list_del(&match->list);
 		kfree(match);
 	}
@@ -1747,7 +1747,7 @@ static struct packet_fanout *fanout_release(struct sock *sk)
 	if (f) {
 		po->fanout = NULL;
 
-		if (atomic_dec_and_test(&f->sk_ref))
+		if (refcount_dec_and_test(&f->sk_ref))
 			list_del(&f->list);
 		else
 			f = NULL;
@@ -2265,20 +2265,18 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 		if (po->stats.stats1.tp_drops)
 			status |= TP_STATUS_LOSING;
 	}
+
+	if (do_vnet &&
+	    __packet_rcv_vnet(skb, h.raw + macoff -
+			      sizeof(struct virtio_net_hdr)))
+		goto drop_n_account;
+
 	po->stats.stats1.tp_packets++;
 	if (copy_skb) {
 		status |= TP_STATUS_COPY;
 		__skb_queue_tail(&sk->sk_receive_queue, copy_skb);
 	}
 	spin_unlock(&sk->sk_receive_queue.lock);
-
-	if (do_vnet) {
-		if (__packet_rcv_vnet(skb, h.raw + macoff -
-					   sizeof(struct virtio_net_hdr))) {
-			spin_lock(&sk->sk_receive_queue.lock);
-			goto drop_n_account;
-		}
-	}
 
 	skb_copy_bits(skb, 0, h.raw + macoff, snaplen);
 
@@ -4205,7 +4203,7 @@ static char *alloc_one_pg_vec_page(unsigned long order)
 		return buffer;
 
 	/* __get_free_pages failed, fall back to vmalloc */
-	buffer = vzalloc((1 << order) * PAGE_SIZE);
+	buffer = vzalloc(array_size((1 << order), PAGE_SIZE));
 	if (buffer)
 		return buffer;
 

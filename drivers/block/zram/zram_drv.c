@@ -39,7 +39,11 @@ static DEFINE_IDR(zram_index_idr);
 static DEFINE_MUTEX(zram_index_mutex);
 
 static int zram_major;
+#ifdef CONFIG_CRYPTO_LZ4
+static const char *default_compressor = "lz4";
+#else
 static const char *default_compressor = "lzo";
+#endif
 
 /*
  * We don't need to see memory allocation errors more than once every 1
@@ -131,7 +135,7 @@ static void zram_revalidate_disk(struct zram *zram)
 {
 	revalidate_disk(zram->disk);
 	/* revalidate_disk reset the BDI_CAP_STABLE_WRITES so set again */
-	zram->disk->queue->backing_dev_info.capabilities |=
+	zram->disk->queue->backing_dev_info->capabilities |=
 		BDI_CAP_STABLE_WRITES;
 }
 
@@ -499,7 +503,7 @@ static bool zram_meta_alloc(struct zram *zram, u64 disksize)
 	size_t num_pages;
 
 	num_pages = disksize >> PAGE_SHIFT;
-	zram->table = vzalloc(num_pages * sizeof(*zram->table));
+	zram->table = vzalloc(array_size(num_pages, sizeof(*zram->table)));
 	if (!zram->table)
 		return false;
 

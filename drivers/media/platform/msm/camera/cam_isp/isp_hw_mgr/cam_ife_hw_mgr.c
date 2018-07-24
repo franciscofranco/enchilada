@@ -210,7 +210,8 @@ static int cam_ife_hw_mgr_start_hw_res(
 	int rc = -1;
 	struct cam_hw_intf      *hw_intf;
 
-	for (i = 0; i < CAM_ISP_HW_SPLIT_MAX; i++) {
+	/* Start slave (which is right split) first */
+	for (i = CAM_ISP_HW_SPLIT_MAX - 1; i >= 0; i--) {
 		if (!isp_hw_res->hw_res[i])
 			continue;
 		hw_intf = isp_hw_res->hw_res[i]->hw_intf;
@@ -959,6 +960,7 @@ static int cam_ife_hw_mgr_acquire_res_ife_csid_ipp(
 {
 	int rc = -1;
 	int i;
+	int master_idx = -1;
 
 	struct cam_ife_hw_mgr               *ife_hw_mgr;
 	struct cam_ife_hw_mgr_res           *csid_res;
@@ -1010,18 +1012,27 @@ static int cam_ife_hw_mgr_acquire_res_ife_csid_ipp(
 			if (!cid_res->hw_res[i])
 				continue;
 
-			csid_acquire.node_res = NULL;
-			if (csid_res->is_dual_vfe) {
-				if (i == CAM_ISP_HW_SPLIT_LEFT)
-					csid_acquire.sync_mode =
-						CAM_ISP_HW_SYNC_MASTER;
-				else
-					csid_acquire.sync_mode =
-						CAM_ISP_HW_SYNC_SLAVE;
-			}
-
 			hw_intf = ife_hw_mgr->csid_devices[
 				cid_res->hw_res[i]->hw_intf->hw_idx];
+
+			csid_acquire.node_res = NULL;
+			if (csid_res->is_dual_vfe) {
+				if (i == CAM_ISP_HW_SPLIT_LEFT) {
+					master_idx = hw_intf->hw_idx;
+					csid_acquire.sync_mode =
+						CAM_ISP_HW_SYNC_MASTER;
+				} else {
+					if (master_idx == -1) {
+						CAM_ERR(CAM_ISP,
+							"No Master found");
+						goto err;
+					}
+					csid_acquire.sync_mode =
+						CAM_ISP_HW_SYNC_SLAVE;
+					csid_acquire.master_idx = master_idx;
+				}
+			}
+
 			rc = hw_intf->hw_ops.reserve(hw_intf->hw_priv,
 				&csid_acquire, sizeof(csid_acquire));
 			if (rc) {
@@ -1356,6 +1367,7 @@ static int cam_ife_mgr_acquire_hw(void *hw_mgr_priv,
 	uint32_t                           num_rdi_port_per_in = 0;
 	uint32_t                           total_pix_port = 0;
 	uint32_t                           total_rdi_port = 0;
+	uint32_t                           in_port_length = 0;
 
 	CAM_DBG(CAM_ISP, "Enter...");
 
@@ -1416,9 +1428,27 @@ static int cam_ife_mgr_acquire_hw(void *hw_mgr_priv,
 			isp_resource[i].res_hdl,
 			isp_resource[i].length);
 
+		in_port_length = sizeof(struct cam_isp_in_port_info);
+
+		if (in_port_length > isp_resource[i].length) {
+			CAM_ERR(CAM_ISP, "buffer size is not enough");
+			rc = -EINVAL;
+			goto free_res;
+		}
+
 		in_port = memdup_user((void __user *)isp_resource[i].res_hdl,
 			isp_resource[i].length);
-		if (in_port > 0) {
+		if (!IS_ERR(in_port)) {
+			in_port_length = sizeof(struct cam_isp_in_port_info) +
+				(in_port->num_out_res - 1) *
+				sizeof(struct cam_isp_out_port_info);
+			if (in_port_length > isp_resource[i].length) {
+				CAM_ERR(CAM_ISP, "buffer size is not enough");
+				rc = -EINVAL;
+				kfree(in_port);
+				goto free_res;
+			}
+
 			rc = cam_ife_mgr_acquire_hw_for_ctx(ife_ctx, in_port,
 				&num_pix_port_per_in, &num_rdi_port_per_in);
 			total_pix_port += num_pix_port_per_in;
@@ -1611,8 +1641,9 @@ static int cam_ife_mgr_config_hw(void *hw_mgr_priv,
 			cdm_cmd->cmd[i].len = cmd->len;
 		}
 
-		if (cfg->request_id == 1)
+		if (cfg->init_packet)
 			init_completion(&ctx->config_done_complete);
+
 		CAM_DBG(CAM_ISP, "Submit to CDM");
 		rc = cam_cdm_submit_bls(ctx->cdm_handle, cdm_cmd);
 		if (rc) {
@@ -1621,7 +1652,6 @@ static int cam_ife_mgr_config_hw(void *hw_mgr_priv,
 		}
 
 		if (cfg->init_packet) {
-			init_completion(&ctx->config_done_complete);
 			rc = wait_for_completion_timeout(
 				&ctx->config_done_complete,
 				msecs_to_jiffies(30));
@@ -1833,6 +1863,7 @@ static int cam_ife_mgr_stop_hw(void *hw_mgr_priv, void *stop_hw_args)
 	}
 
 	cam_tasklet_stop(ctx->common.tasklet_info);
+
 	/*
 	 * If Context does not have PIX resources and has only RDI resource
 	 * then take the first base index.
@@ -2676,7 +2707,8 @@ static int cam_ife_mgr_cmd(void *hw_mgr_priv, void *cmd_args)
 
 static int cam_ife_mgr_cmd_get_sof_timestamp(
 	struct cam_ife_hw_mgr_ctx      *ife_ctx,
-	uint64_t                       *time_stamp)
+	uint64_t                       *time_stamp,
+	uint64_t                       *boot_time_stamp)
 {
 	int rc = -EINVAL;
 	uint32_t i;
@@ -2705,9 +2737,12 @@ static int cam_ife_mgr_cmd_get_sof_timestamp(
 					&csid_get_time,
 					sizeof(
 					struct cam_csid_get_time_stamp_args));
-				if (!rc)
+				if (!rc) {
 					*time_stamp =
 						csid_get_time.time_stamp_val;
+					*boot_time_stamp =
+						csid_get_time.boot_timestamp;
+				}
 			/*
 			 * Single VFE case, Get the time stamp from available
 			 * one csid hw in the context
@@ -3538,7 +3573,8 @@ static int cam_ife_hw_mgr_handle_sof(
 				if (!sof_status && !sof_sent) {
 					cam_ife_mgr_cmd_get_sof_timestamp(
 						ife_hw_mgr_ctx,
-						&sof_done_event_data.timestamp);
+						&sof_done_event_data.timestamp,
+						&sof_done_event_data.boot_time);
 
 					ife_hw_irq_sof_cb(
 						ife_hw_mgr_ctx->common.cb_priv,
@@ -3559,7 +3595,8 @@ static int cam_ife_hw_mgr_handle_sof(
 			if (!sof_status && !sof_sent) {
 				cam_ife_mgr_cmd_get_sof_timestamp(
 					ife_hw_mgr_ctx,
-					&sof_done_event_data.timestamp);
+					&sof_done_event_data.timestamp,
+					&sof_done_event_data.boot_time);
 
 				ife_hw_irq_sof_cb(
 					ife_hw_mgr_ctx->common.cb_priv,
@@ -4033,6 +4070,8 @@ int cam_ife_hw_mgr_init(struct cam_hw_mgr_intf *hw_mgr_intf)
 	int rc = -EFAULT;
 	int i, j;
 	struct cam_iommu_handle cdm_handles;
+	struct cam_ife_hw_mgr_ctx *ctx_pool;
+	struct cam_ife_hw_mgr_res *res_list_ife_out;
 
 	CAM_DBG(CAM_ISP, "Enter");
 
@@ -4137,9 +4176,10 @@ int cam_ife_hw_mgr_init(struct cam_hw_mgr_intf *hw_mgr_intf)
 		INIT_LIST_HEAD(&g_ife_hw_mgr.ctx_pool[i].res_list_ife_cid);
 		INIT_LIST_HEAD(&g_ife_hw_mgr.ctx_pool[i].res_list_ife_csid);
 		INIT_LIST_HEAD(&g_ife_hw_mgr.ctx_pool[i].res_list_ife_src);
+		ctx_pool = &g_ife_hw_mgr.ctx_pool[i];
 		for (j = 0; j < CAM_IFE_HW_OUT_RES_MAX; j++) {
-			INIT_LIST_HEAD(&g_ife_hw_mgr.ctx_pool[i].
-				res_list_ife_out[j].list);
+			res_list_ife_out = &ctx_pool->res_list_ife_out[j];
+			INIT_LIST_HEAD(&res_list_ife_out->list);
 		}
 
 		/* init context pool */
@@ -4169,6 +4209,7 @@ int cam_ife_hw_mgr_init(struct cam_hw_mgr_intf *hw_mgr_intf)
 			&g_ife_hw_mgr.ctx_pool[i], i);
 		g_ife_hw_mgr.ctx_pool[i].common.tasklet_info =
 			g_ife_hw_mgr.mgr_common.tasklet_pool[i];
+
 
 		init_completion(&g_ife_hw_mgr.ctx_pool[i].config_done_complete);
 		list_add_tail(&g_ife_hw_mgr.ctx_pool[i].list,

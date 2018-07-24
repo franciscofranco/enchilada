@@ -833,7 +833,7 @@ static int raid10_congested(struct mddev *mddev, int bits)
 		if (rdev && !test_bit(Faulty, &rdev->flags)) {
 			struct request_queue *q = bdev_get_queue(rdev->bdev);
 
-			ret |= bdi_congested(&q->backing_dev_info, bits);
+			ret |= bdi_congested(q->backing_dev_info, bits);
 		}
 	}
 	rcu_read_unlock();
@@ -3546,8 +3546,8 @@ static struct r10conf *setup_conf(struct mddev *mddev)
 		goto out;
 
 	/* FIXME calc properly */
-	conf->mirrors = kzalloc(sizeof(struct raid10_info)*(mddev->raid_disks +
-							    max(0,-mddev->delta_disks)),
+	conf->mirrors = kcalloc(mddev->raid_disks + max(0, -mddev->delta_disks),
+				sizeof(struct raid10_info),
 				GFP_KERNEL);
 	if (!conf->mirrors)
 		goto out;
@@ -3762,8 +3762,8 @@ static int raid10_run(struct mddev *mddev)
 		 * maybe...
 		 */
 		stripe /= conf->geo.near_copies;
-		if (mddev->queue->backing_dev_info.ra_pages < 2 * stripe)
-			mddev->queue->backing_dev_info.ra_pages = 2 * stripe;
+		if (mddev->queue->backing_dev_info->ra_pages < 2 * stripe)
+			mddev->queue->backing_dev_info->ra_pages = 2 * stripe;
 	}
 
 	if (md_integrity_register(mddev))
@@ -3979,11 +3979,9 @@ static int raid10_check_reshape(struct mddev *mddev)
 	conf->mirrors_new = NULL;
 	if (mddev->delta_disks > 0) {
 		/* allocate new 'mirrors' list */
-		conf->mirrors_new = kzalloc(
-			sizeof(struct raid10_info)
-			*(mddev->raid_disks +
-			  mddev->delta_disks),
-			GFP_KERNEL);
+		conf->mirrors_new = kcalloc(mddev->raid_disks + mddev->delta_disks,
+					    sizeof(struct raid10_info),
+					    GFP_KERNEL);
 		if (!conf->mirrors_new)
 			return -ENOMEM;
 	}
@@ -4566,8 +4564,8 @@ static void end_reshape(struct r10conf *conf)
 		int stripe = conf->geo.raid_disks *
 			((conf->mddev->chunk_sectors << 9) / PAGE_SIZE);
 		stripe /= conf->geo.near_copies;
-		if (conf->mddev->queue->backing_dev_info.ra_pages < 2 * stripe)
-			conf->mddev->queue->backing_dev_info.ra_pages = 2 * stripe;
+		if (conf->mddev->queue->backing_dev_info->ra_pages < 2 * stripe)
+			conf->mddev->queue->backing_dev_info->ra_pages = 2 * stripe;
 	}
 	conf->fullsync = 0;
 }

@@ -1274,8 +1274,7 @@ void ch_push_remote_rx_intent(struct channel_ctx *ctx, size_t size,
 	spin_unlock_irqrestore(&ctx->rmt_rx_intent_lst_lock_lhc2, flags);
 
 	GLINK_DBG_CH(ctx, "%s: R[%u]:%zu Pushed remote intent\n", __func__,
-			intent->id,
-			intent->intent_size);
+			riid, size);
 }
 
 /**
@@ -3938,9 +3937,9 @@ static int glink_core_init_xprt_qos_cfg(struct glink_core_xprt_ctx *xprt_ptr,
 	xprt_ptr->token_count = cfg->token_count ? cfg->token_count :
 					GLINK_QOS_DEF_NUM_TOKENS;
 
-	xprt_ptr->prio_bin = kzalloc(xprt_ptr->num_priority *
-				sizeof(struct glink_qos_priority_bin),
-				GFP_KERNEL);
+	xprt_ptr->prio_bin = kcalloc(xprt_ptr->num_priority,
+				     sizeof(struct glink_qos_priority_bin),
+				     GFP_KERNEL);
 	if (xprt_ptr->num_priority > 1)
 		sched_setscheduler(xprt_ptr->tx_task, SCHED_FIFO, &param);
 	if (!xprt_ptr->prio_bin) {

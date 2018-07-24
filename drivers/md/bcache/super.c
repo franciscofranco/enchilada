@@ -804,7 +804,7 @@ static int bcache_device_init(struct bcache_device *d, unsigned block_size,
 	blk_queue_make_request(q, NULL);
 	d->disk->queue			= q;
 	q->queuedata			= d;
-	q->backing_dev_info.congested_data = d;
+	q->backing_dev_info->congested_data = d;
 	q->limits.max_hw_sectors	= UINT_MAX;
 	q->limits.max_sectors		= UINT_MAX;
 	q->limits.max_segment_size	= UINT_MAX;
@@ -1150,9 +1150,9 @@ static int cached_dev_init(struct cached_dev *dc, unsigned block_size)
 	set_capacity(dc->disk.disk,
 		     dc->bdev->bd_part->nr_sects - dc->sb.data_offset);
 
-	dc->disk.disk->queue->backing_dev_info.ra_pages =
-		max(dc->disk.disk->queue->backing_dev_info.ra_pages,
-		    q->backing_dev_info.ra_pages);
+	dc->disk.disk->queue->backing_dev_info->ra_pages =
+		max(dc->disk.disk->queue->backing_dev_info->ra_pages,
+		    q->backing_dev_info->ra_pages);
 
 	bch_cached_dev_request_init(dc);
 	bch_cached_dev_writeback_init(dc);
@@ -1536,7 +1536,7 @@ struct cache_set *bch_cache_set_alloc(struct cache_sb *sb)
 	iter_size = (sb->bucket_size / sb->block_size + 1) *
 		sizeof(struct btree_iter_set);
 
-	if (!(c->devices = kzalloc(c->nr_uuids * sizeof(void *), GFP_KERNEL)) ||
+	if (!(c->devices = kcalloc(c->nr_uuids, sizeof(void *), GFP_KERNEL)) ||
 	    !(c->bio_meta = mempool_create_kmalloc_pool(2,
 				sizeof(struct bbio) + sizeof(struct bio_vec) *
 				bucket_pages(c))) ||
@@ -1861,10 +1861,8 @@ static int cache_alloc(struct cache *ca)
 	    !init_fifo(&ca->free[RESERVE_NONE], free, GFP_KERNEL) ||
 	    !init_fifo(&ca->free_inc,	free << 2, GFP_KERNEL) ||
 	    !init_heap(&ca->heap,	free << 3, GFP_KERNEL) ||
-	    !(ca->buckets	= vzalloc(sizeof(struct bucket) *
-					  ca->sb.nbuckets)) ||
-	    !(ca->prio_buckets	= kzalloc(sizeof(uint64_t) * prio_buckets(ca) *
-					  2, GFP_KERNEL)) ||
+	    !(ca->buckets	= vzalloc(array_size(sizeof(struct bucket), ca->sb.nbuckets))) ||
+	    !(ca->prio_buckets	= kzalloc(array3_size(sizeof(uint64_t), prio_buckets(ca), 2), GFP_KERNEL)) ||
 	    !(ca->disk_buckets	= alloc_bucket_pages(GFP_KERNEL, ca)))
 		return -ENOMEM;
 

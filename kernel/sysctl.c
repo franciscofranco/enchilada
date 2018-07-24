@@ -334,6 +334,13 @@ static struct ctl_table kern_table[] = {
 		.extra1		= &zero,
 		.extra2		= &one,
 	},
+	{
+		.procname	= "sched_initial_task_util",
+		.data		= &sysctl_sched_init_task_load_pct,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
 #endif
 	{
 		.procname	= "sched_upmigrate",
@@ -391,13 +398,6 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 #endif
-	{
-		.procname	= "sched_initial_task_util",
-		.data		= &sysctl_sched_initial_task_util,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
 	{
 		.procname	= "sched_cstate_aware",
 		.data		= &sysctl_sched_cstate_aware,
@@ -1485,6 +1485,15 @@ static struct ctl_table vm_table[] = {
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &zero,
 		.extra2		= &one_hundred,
+	},
+	{
+		.procname       = "want_old_faultaround_pte",
+		.data           = &want_old_faultaround_pte,
+		.maxlen         = sizeof(want_old_faultaround_pte),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec_minmax,
+		.extra1         = &zero,
+		.extra2         = &one,
 	},
 #ifdef CONFIG_HUGETLB_PAGE
 	{
@@ -2961,7 +2970,8 @@ int proc_do_large_bitmap(struct ctl_table *table, int write,
 		if (IS_ERR(kbuf))
 			return PTR_ERR(kbuf);
 
-		tmp_bitmap = kzalloc(BITS_TO_LONGS(bitmap_len) * sizeof(unsigned long),
+		tmp_bitmap = kcalloc(BITS_TO_LONGS(bitmap_len),
+				     sizeof(unsigned long),
 				     GFP_KERNEL);
 		if (!tmp_bitmap) {
 			kfree(kbuf);

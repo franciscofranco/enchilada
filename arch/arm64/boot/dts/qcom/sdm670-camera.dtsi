@@ -234,9 +234,7 @@
 		msm_cam_smmu_lrme {
 			compatible = "qcom,msm-cam-smmu-cb";
 			iommus = <&apps_smmu 0x1038 0x0>,
-				<&apps_smmu 0x1058 0x0>,
-				<&apps_smmu 0x1039 0x0>,
-				<&apps_smmu 0x1059 0x0>;
+				<&apps_smmu 0x1058 0x0>;
 			label = "lrme";
 			lrme_iova_mem_map: iova-mem-map {
 				iova-mem-region-shared {
@@ -410,6 +408,7 @@
 		interrupt-names = "cpas_camnoc";
 		interrupts = <0 459 0>;
 		qcom,cpas-hw-ver = <0x170110>; /* Titan v170 v1.1.0 */
+		camnoc-axi-min-ib-bw = <3000000000>;
 		regulator-names = "camss-vdd";
 		camss-vdd-supply = <&titan_top_gdsc>;
 		clock-names = "gcc_ahb_clk",

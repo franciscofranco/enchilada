@@ -1162,8 +1162,9 @@ bool icnss_is_fw_down(void)
 {
 	if (!penv)
 		return false;
-	else
-		return test_bit(ICNSS_FW_DOWN, &penv->state);
+
+	return test_bit(ICNSS_FW_DOWN, &penv->state) ||
+		test_bit(ICNSS_PD_RESTART, &penv->state);
 }
 EXPORT_SYMBOL(icnss_is_fw_down);
 
@@ -1484,7 +1485,7 @@ out:
 	return ret;
 }
 
-static int wlfw_wlan_mode_send_sync_msg(enum wlfw_driver_mode_enum_v01 mode)
+static int wlfw_wlan_mode_send_sync_msg(u32 mode)
 {
 	int ret;
 	struct wlfw_wlan_mode_req_msg_v01 req;

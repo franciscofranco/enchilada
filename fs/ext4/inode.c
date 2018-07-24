@@ -42,7 +42,7 @@
 #include "xattr.h"
 #include "acl.h"
 #include "truncate.h"
-#include "ext4_ice.h"
+//#include "ext4_ice.h"
 
 #include <trace/events/ext4.h>
 #include <trace/events/android_fs.h>
@@ -379,9 +379,9 @@ static int __check_block_validity(struct inode *inode, const char *func,
 	if (!ext4_data_block_valid(EXT4_SB(inode->i_sb), map->m_pblk,
 				   map->m_len)) {
 		ext4_error_inode(inode, func, line, map->m_pblk,
-				 "lblock %lu mapped to illegal pblock "
+				 "lblock %lu mapped to illegal pblock %llu "
 				 "(length %d)", (unsigned long) map->m_lblk,
-				 map->m_len);
+				 map->m_pblk, map->m_len);
 		return -EFSCORRUPTED;
 	}
 	return 0;
@@ -1154,7 +1154,7 @@ static int ext4_block_write_begin(struct page *page, loff_t pos, unsigned len,
 			*wait_bh++ = bh;
 			decrypt = ext4_encrypted_inode(inode) &&
 				S_ISREG(inode->i_mode) &&
-				!ext4_is_ice_enabled();
+				!fscrypt_using_hardware_encryption(inode);
 		}
 	}
 	/*
@@ -1168,7 +1168,8 @@ static int ext4_block_write_begin(struct page *page, loff_t pos, unsigned len,
 	if (unlikely(err))
 		page_zero_new_buffers(page, from, to);
 	else if (decrypt)
-		err = fscrypt_decrypt_page(page);
+		err = fscrypt_decrypt_page(page->mapping->host, page,
+				PAGE_SIZE, 0, page->index);
 	return err;
 }
 #endif
@@ -3510,9 +3511,9 @@ static ssize_t ext4_direct_IO_write(struct kiocb *iocb, struct iov_iter *iter)
 		get_block_func = ext4_dio_get_block_unwritten_async;
 		dio_flags = DIO_LOCKING;
 	}
-#if defined(CONFIG_EXT4_FS_ENCRYPTION) && \
-!defined(CONFIG_EXT4_FS_ICE_ENCRYPTION)
-	BUG_ON(ext4_encrypted_inode(inode) && S_ISREG(inode->i_mode));
+#if defined(CONFIG_EXT4_FS_ENCRYPTION)
+	WARN_ON(ext4_encrypted_inode(inode) && S_ISREG(inode->i_mode)
+		&& !fscrypt_using_hardware_encryption(inode));
 #endif
 	if (IS_DAX(inode)) {
 		ret = dax_do_io(iocb, inode, iter, get_block_func,
@@ -3633,9 +3634,9 @@ static ssize_t ext4_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 	ssize_t ret;
 	int rw = iov_iter_rw(iter);
 
-#if defined(CONFIG_EXT4_FS_ENCRYPTION) && \
-!defined(CONFIG_EXT4_FS_ICE_ENCRYPTION)
-	if (ext4_encrypted_inode(inode) && S_ISREG(inode->i_mode))
+#if defined(CONFIG_EXT4_FS_ENCRYPTION)
+	if (ext4_encrypted_inode(inode) && S_ISREG(inode->i_mode)
+		&& !fscrypt_using_hardware_encryption(inode))
 		return 0;
 #endif
 
@@ -3832,11 +3833,12 @@ static int __ext4_block_zero_page_range(handle_t *handle,
 			goto unlock;
 		if (S_ISREG(inode->i_mode) &&
 		    ext4_encrypted_inode(inode) &&
-		    !fs_using_hardware_encryption(inode)) {
+		    !fscrypt_using_hardware_encryption(inode)) {
 			/* We expect the key to be set. */
 			BUG_ON(!fscrypt_has_encryption_key(inode));
 			BUG_ON(blocksize != PAGE_SIZE);
-			WARN_ON_ONCE(fscrypt_decrypt_page(page));
+			WARN_ON_ONCE(fscrypt_decrypt_page(page->mapping->host,
+						page, PAGE_SIZE, 0, page->index));
 		}
 	}
 	if (ext4_should_journal_data(inode)) {
@@ -4309,7 +4311,8 @@ static int __ext4_get_inode_loc(struct inode *inode,
 	int			inodes_per_block, inode_offset;
 
 	iloc->bh = NULL;
-	if (!ext4_valid_inum(sb, inode->i_ino))
+	if (inode->i_ino < EXT4_ROOT_INO ||
+	    inode->i_ino > le32_to_cpu(EXT4_SB(sb)->s_es->s_inodes_count))
 		return -EFSCORRUPTED;
 
 	iloc->block_group = (inode->i_ino - 1) / EXT4_INODES_PER_GROUP(sb);
@@ -4460,8 +4463,11 @@ void ext4_set_inode_flags(struct inode *inode)
 		new_fl |= S_DIRSYNC;
 	if (test_opt(inode->i_sb, DAX) && S_ISREG(inode->i_mode))
 		new_fl |= S_DAX;
+	if (flags & EXT4_ENCRYPT_FL)
+		new_fl |= S_ENCRYPTED;
 	inode_set_flags(inode, new_fl,
-			S_SYNC|S_APPEND|S_IMMUTABLE|S_NOATIME|S_DIRSYNC|S_DAX);
+			S_SYNC|S_APPEND|S_IMMUTABLE|S_NOATIME|S_DIRSYNC|S_DAX|
+			S_ENCRYPTED);
 }
 
 /* Propagate flags from i_flags to EXT4_I(inode)->i_flags */

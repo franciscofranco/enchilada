@@ -724,13 +724,11 @@ static bool has_useable_gicv3_cpuif(const struct arm64_cpu_capabilities *entry, 
 static bool has_no_hw_prefetch(const struct arm64_cpu_capabilities *entry, int __unused)
 {
 	u32 midr = read_cpuid_id();
-	u32 rv_min, rv_max;
 
 	/* Cavium ThunderX pass 1.x and 2.x */
-	rv_min = 0;
-	rv_max = (1 << MIDR_VARIANT_SHIFT) | MIDR_REVISION_MASK;
-
-	return MIDR_IS_CPU_MODEL_RANGE(midr, MIDR_THUNDERX, rv_min, rv_max);
+	return MIDR_IS_CPU_MODEL_RANGE(midr, MIDR_THUNDERX,
+		MIDR_CPU_VAR_REV(0, 0),
+		MIDR_CPU_VAR_REV(1, MIDR_REVISION_MASK));
 }
 
 static bool runs_at_el2(const struct arm64_cpu_capabilities *entry, int __unused)
@@ -831,6 +829,22 @@ static int __init parse_kpti(char *str)
 early_param("kpti", parse_kpti);
 #endif	/* CONFIG_UNMAP_KERNEL_AT_EL0 */
 
+static int cpu_copy_el2regs(void *__unused)
+{
+	/*
+	 * Copy register values that aren't redirected by hardware.
+	 *
+	 * Before code patching, we only set tpidr_el1, all CPUs need to copy
+	 * this value to tpidr_el2 before we patch the code. Once we've done
+	 * that, freshly-onlined CPUs will set tpidr_el2, so we don't need to
+	 * do anything here.
+	 */
+	if (!alternatives_applied)
+		write_sysreg(read_sysreg(tpidr_el1), tpidr_el2);
+
+	return 0;
+}
+
 static const struct arm64_cpu_capabilities arm64_features[] = {
 	{
 		.desc = "GIC system register CPU interface",
@@ -897,6 +911,7 @@ static const struct arm64_cpu_capabilities arm64_features[] = {
 		.capability = ARM64_HAS_VIRT_HOST_EXTN,
 		.def_scope = SCOPE_SYSTEM,
 		.matches = runs_at_el2,
+		.enable = cpu_copy_el2regs,
 	},
 	{
 		.desc = "32-bit EL0 Support",

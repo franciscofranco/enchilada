@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -345,13 +345,17 @@ static int arm_memlat_mon_driver_probe(struct platform_device *pdev)
 	}
 
 	hw->num_cores = cpumask_weight(&cpu_grp->cpus);
-	hw->core_stats = devm_kzalloc(dev, hw->num_cores *
-				sizeof(*(hw->core_stats)), GFP_KERNEL);
+	hw->core_stats = devm_kcalloc(dev,
+				      hw->num_cores,
+				      sizeof(*(hw->core_stats)),
+				      GFP_KERNEL);
 	if (!hw->core_stats)
 		return -ENOMEM;
 
-	cpu_grp->cpustats = devm_kzalloc(dev, hw->num_cores *
-			sizeof(*(cpu_grp->cpustats)), GFP_KERNEL);
+	cpu_grp->cpustats = devm_kcalloc(dev,
+					 hw->num_cores,
+					 sizeof(*(cpu_grp->cpustats)),
+					 GFP_KERNEL);
 	if (!cpu_grp->cpustats)
 		return -ENOMEM;
 
@@ -420,6 +424,7 @@ static struct platform_driver arm_memlat_mon_driver = {
 	.driver = {
 		.name = "arm-memlat-mon",
 		.of_match_table = memlat_match_table,
+		.suppress_bind_attrs = true,
 	},
 };
 

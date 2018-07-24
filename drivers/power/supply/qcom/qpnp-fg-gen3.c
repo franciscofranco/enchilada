@@ -128,6 +128,8 @@
 #define KI_COEFF_MED_DISCHG_v2_OFFSET	0
 #define KI_COEFF_HI_DISCHG_v2_WORD	10
 #define KI_COEFF_HI_DISCHG_v2_OFFSET	1
+#define KI_COEFF_HI_CHG_v2_WORD		11
+#define KI_COEFF_HI_CHG_v2_OFFSET	2
 #define DELTA_BSOC_THR_v2_WORD		12
 #define DELTA_BSOC_THR_v2_OFFSET	3
 #define DELTA_MSOC_THR_v2_WORD		13
@@ -316,11 +318,17 @@ static struct fg_sram_param pmi8998_v2_sram_params[] = {
 		ESR_TIMER_CHG_INIT_OFFSET, 2, 1, 1, 0, fg_encode_default, NULL),
 	PARAM(ESR_PULSE_THRESH, ESR_PULSE_THRESH_WORD, ESR_PULSE_THRESH_OFFSET,
 		1, 100000, 390625, 0, fg_encode_default, NULL),
+	PARAM(KI_COEFF_LOW_DISCHG, KI_COEFF_LOW_DISCHG_v2_WORD,
+		KI_COEFF_LOW_DISCHG_v2_OFFSET, 1, 1000, 244141, 0,
+		fg_encode_default, NULL),
 	PARAM(KI_COEFF_MED_DISCHG, KI_COEFF_MED_DISCHG_v2_WORD,
 		KI_COEFF_MED_DISCHG_v2_OFFSET, 1, 1000, 244141, 0,
 		fg_encode_default, NULL),
 	PARAM(KI_COEFF_HI_DISCHG, KI_COEFF_HI_DISCHG_v2_WORD,
 		KI_COEFF_HI_DISCHG_v2_OFFSET, 1, 1000, 244141, 0,
+		fg_encode_default, NULL),
+	PARAM(KI_COEFF_HI_CHG, KI_COEFF_HI_CHG_v2_WORD,
+		KI_COEFF_HI_CHG_v2_OFFSET, 1, 1000, 244141, 0,
 		fg_encode_default, NULL),
 	PARAM(KI_COEFF_FULL_SOC, KI_COEFF_FULL_SOC_WORD,
 		KI_COEFF_FULL_SOC_OFFSET, 1, 1000, 244141, 0,
@@ -3950,6 +3958,14 @@ static int fg_notifier_cb(struct notifier_block *nb,
 	struct power_supply *psy = data;
 	struct fg_chip *chip = container_of(nb, struct fg_chip, nb);
 
+	spin_lock(&chip->suspend_lock);
+	if (chip->suspended) {
+		/* Return if we are still suspended */
+		spin_unlock(&chip->suspend_lock);
+		return NOTIFY_OK;
+	}
+	spin_unlock(&chip->suspend_lock);
+
 	if (event != PSY_EVENT_PROP_CHANGED)
 		return NOTIFY_OK;
 
@@ -4293,6 +4309,35 @@ static int fg_hw_init(struct fg_chip *chip)
 			ESR_PULL_DOWN_MODE_MASK, val);
 		if (rc < 0) {
 			pr_err("Error in writing esr_pull_down, rc=%d\n", rc);
+			return rc;
+		}
+	}
+
+	if (chip->dt.ki_coeff_low_dischg != -EINVAL) {
+		fg_encode(chip->sp, FG_SRAM_KI_COEFF_LOW_DISCHG,
+			chip->dt.ki_coeff_low_dischg, &val);
+		rc = fg_sram_write(chip,
+				chip->sp[FG_SRAM_KI_COEFF_LOW_DISCHG].addr_word,
+				chip->sp[FG_SRAM_KI_COEFF_LOW_DISCHG].addr_byte,
+				&val, chip->sp[FG_SRAM_KI_COEFF_LOW_DISCHG].len,
+				FG_IMA_DEFAULT);
+		if (rc < 0) {
+			pr_err("Error in writing ki_coeff_low_dischg, rc=%d\n",
+				rc);
+			return rc;
+		}
+	}
+
+	if (chip->dt.ki_coeff_hi_chg != -EINVAL) {
+		fg_encode(chip->sp, FG_SRAM_KI_COEFF_HI_CHG,
+			chip->dt.ki_coeff_hi_chg, &val);
+		rc = fg_sram_write(chip,
+				chip->sp[FG_SRAM_KI_COEFF_HI_CHG].addr_word,
+				chip->sp[FG_SRAM_KI_COEFF_HI_CHG].addr_byte,
+				&val, chip->sp[FG_SRAM_KI_COEFF_HI_CHG].len,
+				FG_IMA_DEFAULT);
+		if (rc < 0) {
+			pr_err("Error in writing ki_coeff_hi_chg, rc=%d\n", rc);
 			return rc;
 		}
 	}
@@ -4755,6 +4800,16 @@ static int fg_parse_ki_coefficients(struct fg_chip *chip)
 	if (!rc)
 		chip->dt.ki_coeff_full_soc_dischg = temp;
 
+	chip->dt.ki_coeff_hi_chg = -EINVAL;
+	rc = of_property_read_u32(node, "qcom,ki-coeff-hi-chg", &temp);
+	if (!rc)
+		chip->dt.ki_coeff_hi_chg = temp;
+
+	chip->dt.ki_coeff_low_dischg = -EINVAL;
+	rc = of_property_read_u32(node, "qcom,ki-coeff-low-dischg", &temp);
+	if (!rc)
+		chip->dt.ki_coeff_low_dischg = temp;
+
 	rc = fg_parse_dt_property_u32_array(node, "qcom,ki-coeff-soc-dischg",
 		chip->dt.ki_coeff_soc, KI_COEFF_SOC_LEVELS);
 	if (rc < 0)
@@ -4817,8 +4872,8 @@ static int fg_parse_ki_coefficients(struct fg_chip *chip)
 #define DEFAULT_ESR_FLT_TEMP_DECIDEGC	100
 #define DEFAULT_ESR_TIGHT_FLT_UPCT	3907
 #define DEFAULT_ESR_BROAD_FLT_UPCT	99610
-#define DEFAULT_ESR_TIGHT_LT_FLT_UPCT	48829
-#define DEFAULT_ESR_BROAD_LT_FLT_UPCT	148438
+#define DEFAULT_ESR_TIGHT_LT_FLT_UPCT	30000
+#define DEFAULT_ESR_BROAD_LT_FLT_UPCT	30000
 #define DEFAULT_ESR_CLAMP_MOHMS		20
 #define DEFAULT_ESR_PULSE_THRESH_MA	110
 #define DEFAULT_ESR_MEAS_CURR_MA	120
@@ -5338,6 +5393,7 @@ static int fg_gen3_probe(struct platform_device *pdev)
 	mutex_init(&chip->ttf.lock);
 	mutex_init(&chip->charge_full_lock);
 	mutex_init(&chip->qnovo_esr_ctrl_lock);
+	spin_lock_init(&chip->suspend_lock);
 	init_completion(&chip->soc_update);
 	init_completion(&chip->soc_ready);
 	INIT_DELAYED_WORK(&chip->profile_load_work, profile_load_work);
@@ -5436,6 +5492,10 @@ static int fg_gen3_suspend(struct device *dev)
 	struct fg_chip *chip = dev_get_drvdata(dev);
 	int rc;
 
+	spin_lock(&chip->suspend_lock);
+	chip->suspended = true;
+	spin_unlock(&chip->suspend_lock);
+
 	rc = fg_esr_timer_config(chip, true);
 	if (rc < 0)
 		pr_err("Error in configuring ESR timer, rc=%d\n", rc);
@@ -5459,6 +5519,16 @@ static int fg_gen3_resume(struct device *dev)
 	if (fg_sram_dump)
 		schedule_delayed_work(&chip->sram_dump_work,
 				msecs_to_jiffies(fg_sram_dump_period_ms));
+
+	if (!work_pending(&chip->status_change_work)) {
+		pm_stay_awake(chip->dev);
+		schedule_work(&chip->status_change_work);
+	}
+
+	spin_lock(&chip->suspend_lock);
+	chip->suspended = false;
+	spin_unlock(&chip->suspend_lock);
+
 	return 0;
 }
 

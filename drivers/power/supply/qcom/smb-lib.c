@@ -3875,6 +3875,11 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 		}
 	}
 	if (vbus_rising) {
+		if (smblib_get_prop_dfp_mode(chg) != POWER_SUPPLY_TYPEC_NONE) {
+			chg->fake_usb_insertion = true;
+			return;
+		}
+
 		rc = smblib_request_dpdm(chg, true);
 		if (rc < 0)
 			smblib_err(chg, "Couldn't to enable DPDM rc=%d\n", rc);
@@ -3895,6 +3900,11 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 				!chg->pd_active)
 			pr_err("APSD disabled on vbus rising without PD\n");
 	} else {
+		if (chg->fake_usb_insertion) {
+			chg->fake_usb_insertion = false;
+			return;
+		}
+
 		if (chg->wa_flags & BOOST_BACK_WA) {
 			data = chg->irq_info[SWITCH_POWER_OK_IRQ].irq_data;
 			if (data) {
@@ -4320,7 +4330,7 @@ static void smblib_handle_apsd_done(struct smb_charger *chg, bool rising)
 		if (chg->usb_type_redet_done)
 			current_limit_ua = DEFAULT_DCP_MA*1000;
 		else
-			current_limit_ua = DEFAULT_SDP_MA*1000;
+			current_limit_ua = DEFAULT_AGAING_CHG_MA*1000;
 	} else if ((apsd_result->bit) == OCP_CHARGER_BIT)
 		current_limit_ua = DEFAULT_DCP_MA*1000;
 
@@ -4377,12 +4387,14 @@ irqreturn_t smblib_handle_usb_source_change(int irq, void *data)
 	int rc = 0;
 	u8 stat;
 
-
 	chg->dash_on = get_prop_fast_chg_started(chg);
 	if (chg->dash_on) {
 		pr_err("return directly because dash is online\n");
 		return IRQ_HANDLED;
 	}
+
+	if (chg->fake_usb_insertion)
+		return IRQ_HANDLED;
 
 	rc = smblib_read(chg, APSD_STATUS_REG, &stat);
 	if (rc < 0) {
@@ -6861,6 +6873,49 @@ void aging_test_check_aicl(struct smb_charger *chg)
 	}
 }
 
+void op_recovery_revert_boost(struct smb_charger *chg)
+{
+	int soc = 0, rc = 0;
+	union power_supply_propval vbus_val;
+	const struct apsd_result *apsd_result;
+
+	chg->dash_on = get_prop_fast_chg_started(chg);
+	if (chg->dash_on) {
+		pr_info("return directly because dash is online\n");
+		return;
+	}
+	if (get_prop_batt_current_now(chg) / 1000 < 0)
+		return;
+	apsd_result = smblib_update_usb_type(chg);
+	if (apsd_result->bit == OCP_CHARGER_BIT)
+		return;
+	soc = get_prop_batt_capacity(chg);
+	if (soc < 7)
+		return;
+	rc = smblib_get_prop_usb_voltage_now(chg, &vbus_val);
+	if (rc < 0) {
+		pr_err("failed to read usb_voltage rc=%d\n", rc);
+		vbus_val.intval = CHG_VOLTAGE_NORMAL;
+	}
+	if (vbus_val.intval < 2000)
+		return;
+	pr_info("suspend usb about 1s\n");
+	chg->revert_boost_trigger = true;
+	vote(chg->usb_icl_votable, BOOST_BACK_VOTER, true, 0);
+	msleep(1000);
+	vote(chg->usb_icl_votable, BOOST_BACK_VOTER, false, 0);
+	chg->revert_boost_trigger = false;
+}
+
+static void op_revert_boost_recovery_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct smb_charger *chg = container_of(dwork,
+		struct smb_charger, revertboost_recovery_work);
+
+	op_recovery_revert_boost(chg);
+}
+
 static void op_heartbeat_work(struct work_struct *work)
 {
 	struct delayed_work *dwork = to_delayed_work(work);
@@ -7561,7 +7616,7 @@ static void smblib_vconn_oc_work(struct work_struct *work)
 
 	if (++chg->vconn_attempts > VCONN_MAX_ATTEMPTS) {
 		smblib_err(chg, "VCONN failed to enable after %d attempts\n",
-			   chg->otg_attempts - 1);
+			   chg->vconn_attempts - 1);
 		chg->vconn_en = false;
 		chg->vconn_attempts = 0;
 		goto unlock;
@@ -7585,14 +7640,7 @@ static void smblib_vconn_oc_work(struct work_struct *work)
 		chg->vconn_attempts = 0;
 		goto unlock;
 	}
-
 	smblib_dbg(chg, PR_OTG, "VCONN OC fell after %dms\n", 2 * i + 1);
-	if (++chg->vconn_attempts > VCONN_MAX_ATTEMPTS) {
-		smblib_err(chg, "VCONN failed to enable after %d attempts\n",
-			   chg->vconn_attempts - 1);
-		chg->vconn_en = false;
-		goto unlock;
-	}
 
 	rc = _smblib_vconn_regulator_enable(chg->vconn_vreg->rdev);
 	if (rc < 0) {
@@ -7933,6 +7981,10 @@ int smblib_init(struct smb_charger *chg)
 	INIT_DELAYED_WORK(&chg->op_re_set_work, op_recovery_set_work);
 	INIT_WORK(&chg->get_aicl_work, op_get_aicl_work);
 	INIT_DELAYED_WORK(&chg->dash_check_work, op_dash_check_work);
+	INIT_DELAYED_WORK(&chg->revertboost_recovery_work,
+				op_revert_boost_recovery_work);
+	schedule_delayed_work(&chg->revertboost_recovery_work,
+				msecs_to_jiffies(16000));
 	schedule_delayed_work(&chg->heartbeat_work,
 			msecs_to_jiffies(HEARTBEAT_INTERVAL_MS));
 	notify_dash_unplug_register(&notify_unplug_event);
