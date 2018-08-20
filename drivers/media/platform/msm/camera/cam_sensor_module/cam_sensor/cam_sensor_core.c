@@ -17,7 +17,6 @@
 #include "cam_soc_util.h"
 #include "cam_trace.h"
 
-
 #include <linux/project_info.h>
 
 struct camera_vendor_match_tbl {
@@ -1153,6 +1152,16 @@ int cam_sensor_power_up(struct cam_sensor_ctrl_t *s_ctrl)
 		return -EINVAL;
 	}
 
+	if (s_ctrl->bob_pwm_switch) {
+		rc = cam_sensor_bob_pwm_mode_switch(soc_info,
+			s_ctrl->bob_reg_index, true);
+		if (rc) {
+			CAM_WARN(CAM_SENSOR,
+			"BoB PWM setup failed rc: %d", rc);
+			rc = 0;
+		}
+	}
+
 	rc = cam_sensor_core_power_up(power_info, soc_info);
 	if (rc < 0) {
 		CAM_ERR(CAM_SENSOR, "power up the core is failed:%d", rc);
@@ -1188,6 +1197,16 @@ int cam_sensor_power_down(struct cam_sensor_ctrl_t *s_ctrl)
 	if (rc < 0) {
 		CAM_ERR(CAM_SENSOR, "power down the core is failed:%d", rc);
 		return rc;
+	}
+
+	if (s_ctrl->bob_pwm_switch) {
+		rc = cam_sensor_bob_pwm_mode_switch(soc_info,
+			s_ctrl->bob_reg_index, false);
+		if (rc) {
+			CAM_WARN(CAM_SENSOR,
+				"BoB PWM setup failed rc: %d", rc);
+			rc = 0;
+		}
 	}
 
 	camera_io_release(&(s_ctrl->io_master_info));
@@ -1322,7 +1341,7 @@ int32_t cam_sensor_apply_request(struct cam_req_mgr_apply_request *apply)
 		CAM_ERR(CAM_SENSOR, "Device data is NULL");
 		return -EINVAL;
 	}
-	CAM_DBG(CAM_SENSOR, " Req Id: %lld", apply->request_id);
+	CAM_DBG(CAM_REQ, " Sensor update req id: %lld", apply->request_id);
 	trace_cam_apply_req("Sensor", apply->request_id);
 	rc = cam_sensor_apply_settings(s_ctrl, apply->request_id,
 		CAM_SENSOR_PACKET_OPCODE_SENSOR_UPDATE);
@@ -1343,6 +1362,11 @@ int32_t cam_sensor_flush_request(struct cam_req_mgr_flush_request *flush_req)
 		cam_get_device_priv(flush_req->dev_hdl);
 	if (!s_ctrl) {
 		CAM_ERR(CAM_SENSOR, "Device data is NULL");
+		return -EINVAL;
+	}
+
+	if (s_ctrl->i2c_data.per_frame == NULL) {
+		CAM_ERR(CAM_SENSOR, "i2c frame data is NULL");
 		return -EINVAL;
 	}
 
