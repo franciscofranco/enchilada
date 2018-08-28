@@ -65,6 +65,7 @@
 #include <linux/kthread.h>
 #include <linux/memcontrol.h>
 #include <linux/show_mem_notifier.h>
+#include <linux/simple_lmk.h>
 
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
@@ -3816,6 +3817,13 @@ retry:
 	if (test_thread_flag(TIF_MEMDIE) && !(gfp_mask & __GFP_NOFAIL))
 		goto nopage;
 
+
+#ifdef CONFIG_ANDROID_SIMPLE_LMK
+	simple_lmk_mem_reclaim();
+	if (gfp_mask & __GFP_NORETRY)
+		goto nopage;
+	goto retry;
+#endif
 
 	/* Try direct reclaim and then allocating */
 	page = __alloc_pages_direct_reclaim(gfp_mask, order, alloc_flags, ac,
