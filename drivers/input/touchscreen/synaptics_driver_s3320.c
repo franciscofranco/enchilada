@@ -64,6 +64,7 @@
 #include <linux/project_info.h>
 #include "synaptics_baseline.h"
 #include "synaptics_dsx_core.h"
+#include <linux/pm_qos.h>
 /*------------------------------------------------Global Define--------------------------------------------*/
 
 #define TP_UNKNOWN 0
@@ -114,6 +115,9 @@ struct fp_underscreen_info {
     uint16_t x;
     uint16_t y;
 };
+
+#define PM_QOS_VALUE_TP 400
+struct pm_qos_request pm_qos_req_tp;
 
 /******************for Red function*****************/
 #define CONFIG_SYNAPTIC_RED
@@ -1891,8 +1895,10 @@ static void synaptics_ts_work_func(struct work_struct *work)
 	uint8_t status = 0;
 	uint8_t inte = 0;
 
-    	struct synaptics_ts_data *ts = ts_g;
+	struct synaptics_ts_data *ts = ts_g;
 
+	pm_qos_add_request(&pm_qos_req_tp, PM_QOS_CPU_DMA_LATENCY,
+				PM_QOS_VALUE_TP);
 	if (atomic_read(&ts->is_stop) == 1)
 	{
 		touch_disable(ts);
@@ -1967,6 +1973,7 @@ END:
 	//ret = set_changer_bit(ts);
 	touch_enable(ts);
 EXIT:
+	pm_qos_remove_request(&pm_qos_req_tp);
 	return;
 }
 
