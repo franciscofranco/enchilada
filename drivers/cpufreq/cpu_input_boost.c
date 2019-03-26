@@ -211,7 +211,7 @@ static void max_boost_worker(struct work_struct *work)
 	}
 
 #ifdef CONFIG_DYNAMIC_STUNE_BOOST
-	if (!do_stune_boost("top-app", dynamic_stune_boost, boost_slot))
+	if (!do_stune_boost("top-app", dynamic_stune_boost, &boost_slot))
 		stune_boost_active = true;
 #endif
 
