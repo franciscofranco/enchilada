@@ -269,7 +269,7 @@ int update_devfreq(struct devfreq *devfreq)
 		freq = ULONG_MAX;
 	} else {
 		/* Reevaluate the proper frequency */
-		err = devfreq->governor->get_target_freq(devfreq, &freq);
+		err = devfreq->governor->get_target_freq(devfreq, &freq, &flags);
 		if (err)
 			return err;
 	}
