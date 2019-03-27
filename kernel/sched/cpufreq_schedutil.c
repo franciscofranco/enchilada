@@ -520,6 +520,9 @@ static ssize_t rate_limit_us_store(struct gov_attr_set *attr_set, const char *bu
 	struct sugov_policy *sg_policy;
 	unsigned int rate_limit_us;
 
+	/* Don't let userspace change this */
+	return count;
+
 	if (kstrtouint(buf, 10, &rate_limit_us))
 		return -EINVAL;
 
@@ -796,7 +799,7 @@ static int sugov_init(struct cpufreq_policy *policy)
 		goto stop_kthread;
 	}
 
-	tunables->rate_limit_us = LATENCY_MULTIPLIER;
+	tunables->rate_limit_us = 10000;
 	tunables->hispeed_load = DEFAULT_HISPEED_LOAD;
 	tunables->hispeed_freq = 0;
 	lat = policy->cpuinfo.transition_latency / NSEC_PER_USEC;
