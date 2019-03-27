@@ -389,7 +389,6 @@ SYSCALL_DEFINE2(timerfd_create, int, clockid, int, flags)
 {
 	int ufd;
 	struct timerfd_ctx *ctx;
-	enum alarmtimer_type type;
 	char task_comm_buf[TASK_COMM_LEN];
 	char file_name_buf[32];
 	int instance;
