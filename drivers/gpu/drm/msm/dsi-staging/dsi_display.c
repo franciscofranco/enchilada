@@ -33,8 +33,8 @@
 #include "dsi_pwr.h"
 #include "sde_dbg.h"
 
-int backlight_min = 0;
-module_param(backlight_min, int, 0644);
+static unsigned short backlight_min = 1;
+module_param(backlight_min, short, 0644);
 
 #define to_dsi_display(x) container_of(x, struct dsi_display, host)
 #define INT_BASE_10 10
@@ -170,6 +170,9 @@ int dsi_display_set_backlight(void *display, u32 bl_lvl)
 
 	bl_scale_ad = panel->bl_config.bl_scale_ad;
 	bl_temp = (u32)bl_temp * bl_scale_ad / MAX_AD_BL_SCALE_LEVEL;
+
+	if (!backlight_min)
+		backlight_min = 1;
 
 	if (bl_temp != 0 && bl_temp < backlight_min)
 		bl_temp = backlight_min;
