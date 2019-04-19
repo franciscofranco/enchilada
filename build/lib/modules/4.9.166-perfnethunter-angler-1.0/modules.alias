@@ -1,0 +1,3 @@
+# Aliases extracted from modules themselves.
+alias of:N*T*Cqcom,llcc-perfmonC* llcc_perfmon
+alias of:N*T*Cqcom,llcc-perfmon llcc_perfmon
