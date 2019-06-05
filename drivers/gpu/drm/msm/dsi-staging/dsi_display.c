@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -73,7 +73,9 @@ static struct pm_qos_request lcdspeedup_big_cpu_qos;
 
 static DEFINE_MUTEX(dsi_display_list_lock);
 static LIST_HEAD(dsi_display_list);
+
 static DEFINE_MUTEX(dsi_display_clk_mutex);
+
 static char dsi_display_primary[MAX_CMDLINE_PARAM_LEN];
 static char dsi_display_secondary[MAX_CMDLINE_PARAM_LEN];
 static struct dsi_display_boot_param boot_displays[MAX_DSI_ACTIVE_DISPLAY];
@@ -4576,8 +4578,9 @@ static ssize_t sysfs_dynamic_dsi_clk_write(struct device *dev,
 
 	pr_info("%s: bitrate param value: '%d'\n", __func__, clk_rate);
 
-	mutex_lock(&dsi_display_clk_mutex);
+	mutex_lock(&display->display_lock);
 
+	mutex_lock(&dsi_display_clk_mutex);
 	display->cached_clk_rate = clk_rate;
 	rc = dsi_display_request_update_dsi_bitrate(display, clk_rate);
 	if (!rc) {
@@ -4590,6 +4593,7 @@ static ssize_t sysfs_dynamic_dsi_clk_write(struct device *dev,
 		atomic_set(&display->clkrate_change_pending, 0);
 		display->cached_clk_rate = 0;
 
+		mutex_unlock(&dsi_display_clk_mutex);
 		mutex_unlock(&display->display_lock);
 
 		return rc;
@@ -4597,6 +4601,7 @@ static ssize_t sysfs_dynamic_dsi_clk_write(struct device *dev,
 	atomic_set(&display->clkrate_change_pending, 1);
 
 	mutex_unlock(&dsi_display_clk_mutex);
+	mutex_unlock(&display->display_lock);
 
 	return count;
 
